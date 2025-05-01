@@ -21,7 +21,7 @@
 5. **管理者エージェント**: 最終評価と行動推奨を提供
 
 # プロジェクト構造
-詳細なプロジェクト構造については [STRUCTURE.md](https://github.com/uhey77/Anomaly-Detection/blob/main/README.md) を参照してください。
+詳細なプロジェクト構造については [STRUCTURE.md](https://github.com/uhey77/Anomaly-Detection/blob/main/STRUCTURE.md) を参照してください。
 
 # 参考文献
 - [Park, T. (2024). マルチエージェントによるLLM異常検知フレームワーク. BIS.](https://arxiv.org/html/2403.19735v1#:~:text=This%20paper%20introduces%20a%20Large,I%20analyse%20the%20S%26P%20500)
