@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 import json
 import plotly.graph_objects as go
+import plotly.io as pio
 from datetime import datetime
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
@@ -110,13 +111,19 @@ def create_plot(df, anomalies):
         height=500
     )
     
-    return fig
+    return pio.to_html(fig, include_plotlyjs=False, full_html=False)
 
-# エージェントシステムを実行
+# エージェントシステムを簡略化して実行
 def run_agent_system(anomalies, llm_provider, enabled_agents):
-    """エージェントシステムを実行して結果を返す"""
+    """エージェントシステムを実行して結果を返す（パフォーマンス向上のため簡略化）"""
     # LLMクライアントを取得
     llm_client = get_llm_client(llm_provider)
+    
+    # 重要な異常のみに絞る（パフォーマンス向上のため）
+    # 最大3件の異常に制限
+    if len(anomalies) > 3:
+        # pct_changeの絶対値が大きい順にソート
+        anomalies = anomalies.iloc[anomalies['pct_change'].abs().argsort()[::-1][:3]].copy()
     
     # エージェントを初期化
     agents = []
@@ -132,14 +139,6 @@ def run_agent_system(anomalies, llm_provider, enabled_agents):
     if 'crosscheck' in enabled_agents:
         crosscheck_agent = CrossCheckAgent(llm_client=llm_client)
         agents.append(crosscheck_agent)
-    
-    if 'report' in enabled_agents:
-        report_agent = ReportIntegrationAgent(llm_client=llm_client)
-        agents.append(report_agent)
-    
-    if 'manager' in enabled_agents:
-        manager_agent = ManagerAgent(llm_client=llm_client)
-        agents.append(manager_agent)
     
     # コンテキスト準備
     context = {
@@ -163,6 +162,7 @@ def run_agent_system(anomalies, llm_provider, enabled_agents):
     
     # 統合エージェントを実行
     if 'report' in enabled_agents:
+        report_agent = ReportIntegrationAgent(llm_client=llm_client)
         context['agent_findings'] = agent_findings
         print("レポート統合エージェントを実行中...")
         report_agent_result = report_agent.process(anomalies, context)
@@ -170,145 +170,50 @@ def run_agent_system(anomalies, llm_provider, enabled_agents):
     
     # 管理者エージェントを実行
     if 'manager' in enabled_agents:
+        manager_agent = ManagerAgent(llm_client=llm_client)
         print("管理者エージェントを実行中...")
         manager_agent_result = manager_agent.process(anomalies, context)
         agent_findings[manager_agent.name] = manager_agent_result
     
     return agent_findings
 
-# 異常検知Webアプリのメイン関数
-def anomaly_detection_app(
+# メインの分析実行関数
+def run_analysis(
     data_source, file_path, 
     detection_method, threshold,
     llm_provider, 
-    use_web_agent, use_knowledge_agent, use_crosscheck_agent, use_report_agent, use_manager_agent,
-    progress=gr.Progress()  # プログレスコンポーネントを受け取る
+    use_web_agent, use_knowledge_agent, use_crosscheck_agent, use_report_agent, use_manager_agent
 ):
-    """
-    異常検知Webアプリのメイン関数
-    """
+    """分析を実行して結果を返す"""
     try:
-        # 進捗表示を更新
-        progress(0, desc="準備中...")
-        status_update = "<p><strong>データ準備中...</strong> (0%)</p>"
-        
         # データを準備
         use_sample = (data_source == "sample")
         df = prepare_data(use_sample, file_path)
-        
-        progress(0.2, desc="異常検知実行中...")
-        status_update = "<p><strong>異常検知実行中...</strong> (20%)</p>"
         
         # 異常検知を実行
         anomalies = detect_anomalies(df, detection_method, threshold)
         
         # プロットを作成
-        progress(0.4, desc="プロット作成中...")
-        status_update = "<p><strong>プロット作成中...</strong> (40%)</p>"
-        plot = create_plot(df, anomalies)
+        plot_html = create_plot(df, anomalies)
         
         # 異常テーブルを作成
         if anomalies.empty:
             anomalies_html = "<p>異常は検出されませんでした。</p>"
+        else:
+            # 表示用にデータを整形
+            anomalies_display = anomalies.copy()
+            anomalies_display['Date'] = anomalies_display['Date'].dt.strftime('%Y-%m-%d')
+            anomalies_display['pct_change'] = anomalies_display['pct_change'].round(2)
             
-            # 処理完了
-            progress(1.0, desc="完了")
-            status_update = f"<p><strong>分析完了</strong> - 異常は検出されませんでした。({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})</p>"
-            
-            # 結果HTMLを作成（プロットだけのシンプルなバージョン）
-            # anomaly_detection_app関数内の結果HTML生成部分を修正
-            html = f"""
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>異常検知分析結果</title>
-                <style>
-                    body {{ font-family: Arial, sans-serif; }}
-                    .tab {{ overflow: hidden; border: 1px solid #ccc; background-color: #f1f1f1; }}
-                    .tab button {{ background-color: inherit; float: left; border: none; outline: none; cursor: pointer; padding: 14px 16px; transition: 0.3s; }}
-                    .tab button:hover {{ background-color: #ddd; }}
-                    .tab button.active {{ background-color: #ccc; }}
-                    .tabcontent {{ display: none; padding: 6px 12px; border: 1px solid #ccc; border-top: none; }}
-                    .active-tab {{ display: block; }}
-                    pre {{ white-space: pre-wrap; }}
-                    .success-alert {{ padding: 15px; background-color: #d4edda; color: #155724; margin-bottom: 15px; border-radius: 4px; }}
-                </style>
-            </head>
-            <body>
-                <h2>異常検知分析結果</h2>
-                <div class="success-alert">
-                    <strong>処理完了!</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-                </div>
-                
-                <div class="tab">
-                    <button class="tablinks active" onclick="openTab(event, 'Plot')">プロット</button>
-                    <button class="tablinks" onclick="openTab(event, 'Anomalies')">検出された異常</button>
-                    <button class="tablinks" onclick="openTab(event, 'Agents')">エージェント分析</button>
-                </div>
-                
-                <div id="Plot" class="tabcontent active-tab">
-                    <div id="plotly-div"></div>
-                </div>
-                
-                <div id="Anomalies" class="tabcontent">
-                    {anomalies_html}
-                </div>
-                
-                <div id="Agents" class="tabcontent">
-                    {agents_html}
-                </div>
-
-                <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-                <script>
-                    // プロットを作成
-                    var plotlyData = {plot.to_json()};
-                    Plotly.newPlot('plotly-div', JSON.parse(plotlyData));
-                    
-                    // タブ切り替え関数
-                    function openTab(evt, tabName) {{
-                        var i, tabcontent, tablinks;
-                        
-                        // すべてのtabcontentを非表示
-                        tabcontent = document.getElementsByClassName("tabcontent");
-                        for (i = 0; i < tabcontent.length; i++) {{
-                            tabcontent[i].style.display = "none";
-                            tabcontent[i].classList.remove("active-tab");
-                        }}
-                        
-                        // すべてのtablinksからactiveクラスを削除
-                        tablinks = document.getElementsByClassName("tablinks");
-                        for (i = 0; i < tablinks.length; i++) {{
-                            tablinks[i].className = tablinks[i].className.replace(" active", "");
-                        }}
-                        
-                        // クリックされたタブとコンテンツをアクティブに
-                        document.getElementById(tabName).style.display = "block";
-                        document.getElementById(tabName).classList.add("active-tab");
-                        evt.currentTarget.className += " active";
-                    }}
-                </script>
-            </body>
-            </html>
-            """
-            
-            return status_update, html
-        
-        # 表示用にデータを整形
-        progress(0.5, desc="表形式データ準備中...")
-        status_update = "<p><strong>表形式データ準備中...</strong> (50%)</p>"
-        anomalies_display = anomalies.copy()
-        anomalies_display['Date'] = anomalies_display['Date'].dt.strftime('%Y-%m-%d')
-        anomalies_display['pct_change'] = anomalies_display['pct_change'].round(2)
-        
-        # HTML表を作成
-        anomalies_html = f"<h3>検出された異常 ({len(anomalies)}件)</h3>"
-        anomalies_html += anomalies_display[['Date', 'Close', 'pct_change']].to_html(
-            index=False, 
-            float_format='%.2f',
-            classes='table table-striped',
-            columns=['Date', 'Close', 'pct_change'],
-            header=['日付', '値', '変化率 (%)']
-        )
+            # HTML表を作成
+            anomalies_html = f"<h3>検出された異常 ({len(anomalies)}件)</h3>"
+            anomalies_html += anomalies_display[['Date', 'Close', 'pct_change']].to_html(
+                index=False, 
+                float_format='%.2f',
+                classes='table table-striped',
+                columns=['Date', 'Close', 'pct_change'],
+                header=['日付', '値', '変化率 (%)']
+            )
         
         # 有効なエージェントのリストを作成
         enabled_agents = []
@@ -323,22 +228,16 @@ def anomaly_detection_app(
         if use_manager_agent:
             enabled_agents.append('manager')
         
-        # エージェント分析を実行
+        # エージェント結果のHTMLを作成
         if not enabled_agents:
             agents_html = "<p>エージェント分析は無効になっています。</p>"
-            
-            # 処理完了
-            progress(1.0, desc="完了")
-            status_update = f"<p><strong>分析完了！</strong> ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})</p>"
+        elif anomalies.empty:
+            agents_html = "<p>異常が検出されなかったため、エージェント分析はスキップされました。</p>"
         else:
             # エージェントシステムを実行
-            progress(0.6, desc="エージェント分析実行中...")
-            status_update = "<p><strong>エージェント分析実行中...</strong> (60%)</p>"
             agent_findings = run_agent_system(anomalies, llm_provider, enabled_agents)
             
             # 結果をHTMLに変換
-            progress(0.8, desc="結果レポート生成中...")
-            status_update = "<p><strong>結果レポート生成中...</strong> (80%)</p>"
             agents_html = "<h3>エージェント分析結果</h3>"
             
             # 最終評価が存在する場合はそれを優先表示
@@ -400,122 +299,70 @@ def anomaly_detection_app(
                 """
             
             agents_html += "</div>"  # アコーディオン終了
-            
-            # 処理完了
-            progress(1.0, desc="完了")
-            status_update = f"<p><strong>分析完了！</strong> ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})</p>"
         
-        # 最終的なHTMLを組み立て
-        html = f"""
-        <!DOCTYPE html>
+        # 完全なHTMLの構築
+        result_html = f"""
         <html>
         <head>
-            <title>異常検知分析結果</title>
             <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+            <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+            <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
             <style>
-                .container {{ max-width: 1200px; margin-top: 20px; }}
+                .container {{ max-width: 1200px; margin: 0 auto; padding: 20px; }}
                 pre {{ white-space: pre-wrap; }}
                 .tab-content {{ margin-top: 20px; }}
             </style>
         </head>
         <body>
             <div class="container">
-                <h2>異常検知分析結果</h2>
-                <div class="alert alert-success">
-                    <strong>処理完了!</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-                </div>
+                <h2 class="mt-4 mb-4">異常検知分析結果</h2>
                 
-                <ul class="nav nav-tabs" id="resultTabs">
-                    <li class="nav-item">
-                        <a class="nav-link active" data-bs-toggle="tab" href="#plot">プロット</a>
+                <ul class="nav nav-tabs" id="resultTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="plot-tab" data-bs-toggle="tab" data-bs-target="#plot" type="button" role="tab" aria-controls="plot" aria-selected="true">プロット</button>
                     </li>
-                    <li class="nav-item">
-                        <a class="nav-link" data-bs-toggle="tab" href="#anomalies">検出された異常</a>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="anomalies-tab" data-bs-toggle="tab" data-bs-target="#anomalies" type="button" role="tab" aria-controls="anomalies" aria-selected="false">検出された異常</button>
                     </li>
-                    <li class="nav-item">
-                        <a class="nav-link" data-bs-toggle="tab" href="#agents">エージェント分析</a>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="agents-tab" data-bs-toggle="tab" data-bs-target="#agents" type="button" role="tab" aria-controls="agents" aria-selected="false">エージェント分析</button>
                     </li>
                 </ul>
                 
-                <div class="tab-content">
-                    <div id="plot" class="tab-pane fade show active">
-                        <div id="plotly-div" class="plotly-plot"></div>
+                <div class="tab-content" id="resultTabsContent">
+                    <div class="tab-pane fade show active" id="plot" role="tabpanel" aria-labelledby="plot-tab">
+                        {plot_html}
                     </div>
-                    <div id="anomalies" class="tab-pane fade">
+                    <div class="tab-pane fade" id="anomalies" role="tabpanel" aria-labelledby="anomalies-tab">
                         {anomalies_html}
                     </div>
-                    <div id="agents" class="tab-pane fade">
+                    <div class="tab-pane fade" id="agents" role="tabpanel" aria-labelledby="agents-tab">
                         {agents_html}
                     </div>
                 </div>
             </div>
-            
-            <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
-            <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-            <script>
-                // Plotlyプロットを埋め込み
-                var plotlyData = {plot.to_json()};
-                Plotly.newPlot('plotly-div', JSON.parse(plotlyData));
-                
-                // タブ機能が正しく動作するようにするJavaScript
-                document.addEventListener('DOMContentLoaded', function() {{
-                    var triggerTabList = [].slice.call(document.querySelectorAll('#resultTabs a'));
-                    triggerTabList.forEach(function(triggerEl) {{
-                        triggerEl.addEventListener('click', function(event) {{
-                            event.preventDefault();
-                            
-                            // すべてのタブとコンテンツを非アクティブに
-                            document.querySelectorAll('.nav-link').forEach(function(tab) {{
-                                tab.classList.remove('active');
-                            }});
-                            document.querySelectorAll('.tab-pane').forEach(function(pane) {{
-                                pane.classList.remove('show', 'active');
-                            }});
-                            
-                            // クリックされたタブとそのコンテンツをアクティブに
-                            this.classList.add('active');
-                            var target = document.querySelector(this.getAttribute('href'));
-                            if (target) {{
-                                target.classList.add('show', 'active');
-                            }}
-                        }});
-                    }});
-                }});
-            </script>
         </body>
         </html>
         """
         
-        return status_update, html
-    
+        return result_html
+        
     except Exception as e:
+        import traceback
+        error_traceback = traceback.format_exc()
         # エラー表示
-        progress(1.0, desc="エラー発生")
-        status_update = f"<p><strong>エラーが発生しました</strong> - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>"
         error_html = f"""
         <div class="alert alert-danger">
             <h4>エラーが発生しました</h4>
             <p>{str(e)}</p>
+            <pre style="white-space: pre-wrap;">{error_traceback}</pre>
         </div>
         """
-        return status_update, error_html
+        return error_html
 
 # Gradio UIの作成
 def create_gradio_ui():
-    with gr.Blocks(title="異常検知分析システム", theme=gr.themes.Base(), css="""
-        #result_container {
-            width: 100%;
-            min-height: 600px;
-        }
-        .full-width {
-            width: 100% !important;
-        }
-        iframe {
-            width: 100%;
-            height: 800px;
-            border: none;
-        }
-    """) as app:
+    with gr.Blocks(title="異常検知分析システム", theme=gr.themes.Base()) as app:
         gr.Markdown("# マルチエージェントLLM異常検知分析システム")
         gr.Markdown("時系列データの異常を検出し、LLMエージェントが分析します。")
         
@@ -531,7 +378,7 @@ def create_gradio_ui():
                     )
                     file_path = gr.File(
                         label="時系列データファイル (CSVまたはExcel)",
-                        type="filepath",  # "file"から"filepath"に変更
+                        type="filepath",
                         visible=False
                     )
                     
@@ -577,31 +424,41 @@ def create_gradio_ui():
                     use_manager_agent = gr.Checkbox(label="管理者エージェント", value=True)
             
             analyze_btn = gr.Button("異常検知を実行", variant="primary")
+            progress_html = gr.HTML("<div></div>")
             
         with gr.Tab("分析結果"):
-            with gr.Row():
-                status_html = gr.HTML("<p>実行開始前です。「異常検知を実行」ボタンをクリックしてください。</p>")
-
-            with gr.Row():
-                progress = gr.Progress()
-
-            result_html = gr.HTML("", elem_id="result_container", elem_classes=["full-width"])
-
+            result_html = gr.HTML("結果はここに表示されます。「異常検知を実行」ボタンをクリックしてください。")
+        
+        # 実行前の進捗表示関数
+        def set_running_status():
+            return """<div class="alert alert-info">
+                         <h4>分析を実行中...</h4>
+                         <p>結果が準備できるまでお待ちください。分析の進捗状況がここに表示されます。</p>
+                      </div>"""
+        
         # 実行ボタンのイベントハンドラ
         analyze_btn.click(
-            fn=anomaly_detection_app,
+            fn=set_running_status,
+            inputs=None,
+            outputs=progress_html
+        ).then(
+            fn=run_analysis,
             inputs=[
-                data_source, file_path,
+                data_source, file_path, 
                 detection_method, threshold,
                 llm_provider,
                 use_web_agent, use_knowledge_agent, use_crosscheck_agent, use_report_agent, use_manager_agent
             ],
-            outputs=[status_html, result_html]
+            outputs=result_html
+        ).then(
+            fn=lambda: "<div></div>",  # プログレス表示をクリア
+            inputs=None,
+            outputs=progress_html
         )
-
+    
     return app
 
 # メイン処理
 if __name__ == "__main__":
     app = create_gradio_ui()
-    app.launch(share=False)
+    app.queue().launch(share=False)
