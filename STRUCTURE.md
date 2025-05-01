@@ -2,6 +2,7 @@
 
 ## ディレクトリとファイルの説明
 
+```markdown
 anomaly_detection/
 ├── data/                        # データ格納ディレクトリ
 │   └── sp500_sample.csv         # サンプルデータ
@@ -26,6 +27,7 @@ anomaly_detection/
 ├── requirements.txt             # 依存パッケージリスト
 ├── .env.example                 # 環境変数テンプレート
 └── .gitignore                   # Gitで無視するファイルリスト
+```
 
 
 ## 主要コンポーネントの説明
