@@ -24,6 +24,9 @@ from agents.crosscheck_agent import CrossCheckAgent
 from agents.report_agent import ReportIntegrationAgent
 from agents.manager_agent import ManagerAgent
 
+# 評価クラスをインポート
+from evaluation import AnomalyEvaluator
+
 # データを準備
 def prepare_data(use_sample, file_path=None):
     """データを準備"""
@@ -215,12 +218,12 @@ def run_analysis(data_source, file_path, detection_method, threshold, llm_provid
             agent_findings = run_agent_system(anomalies, llm_provider, enabled_agents)
         
         # 分析結果を返す
-        return plot, f"検出された異常: {len(anomalies)}件", anomalies_df, agent_findings
+        return plot, f"検出された異常: {len(anomalies)}件", anomalies_df, agent_findings, df, anomalies
         
     except Exception as e:
         import traceback
         error_traceback = traceback.format_exc()
-        return None, f"エラーが発生しました: {str(e)}", pd.DataFrame(), {}
+        return None, f"エラーが発生しました: {str(e)}", pd.DataFrame(), {}, None, None
 
 # エージェント結果をHTMLとして整形
 def format_agent_findings(agent_findings):
@@ -274,11 +277,75 @@ def format_agent_findings(agent_findings):
     
     return html
 
+# 評価関数
+def run_evaluation(df, anomalies, known_anomalies_str, delay_tolerance):
+    try:
+        # 既知の異常を解析
+        known_anomalies = [date.strip() for date in known_anomalies_str.split(',') if date.strip()]
+        
+        # 評価器を初期化
+        evaluator = AnomalyEvaluator(known_anomalies)
+        
+        # 評価を実行
+        eval_results = evaluator.evaluate(df, anomalies, int(delay_tolerance))
+        
+        # 評価指標をDataFrameに変換
+        metrics_df = pd.DataFrame({
+            '指標': ['適合率', '再現率', 'F1スコア', 'Fβスコア', '検知遅延'],
+            '値': [
+                f"{eval_results['precision']:.4f}",
+                f"{eval_results['recall']:.4f}",
+                f"{eval_results['f1_score']:.4f}",
+                f"{eval_results['f_beta_score']:.4f}",
+                f"{eval_results['detection_delay'] if eval_results['detection_delay'] is not None else 'N/A'}"
+            ]
+        })
+        
+        # 混同行列を作成
+        cm_df = pd.DataFrame({
+            '': ['実際: 正常', '実際: 異常'],
+            '検出: 正常': [eval_results['true_negatives'], eval_results['false_negatives']],
+            '検出: 異常': [eval_results['false_positives'], eval_results['true_positives']]
+        })
+        
+        return metrics_df, cm_df
+    
+    except Exception as e:
+        import traceback
+        error_df = pd.DataFrame({'エラー': [str(e), traceback.format_exc()]})
+        return error_df, pd.DataFrame()
+
+# 手法比較関数
+def compare_methods(df, methods, thresholds_text, known_anomalies_str):
+    try:
+        # 閾値を解析
+        thresholds = [float(t.strip()) for t in thresholds_text.split(',') if t.strip()]
+        
+        # 既知の異常を解析
+        known_anomalies = [date.strip() for date in known_anomalies_str.split(',') if date.strip()]
+        
+        # 評価器を初期化
+        evaluator = AnomalyEvaluator(known_anomalies)
+        
+        # 比較を実行
+        results_df = evaluator.compare_methods(df, methods, thresholds)
+        
+        return results_df
+    
+    except Exception as e:
+        import traceback
+        error_df = pd.DataFrame({'エラー': [str(e), traceback.format_exc()]})
+        return error_df
+
 # Gradio UIの作成
 def create_gradio_ui():
     with gr.Blocks(title="異常検知分析システム") as app:
         gr.Markdown("# マルチエージェントLLM異常検知分析システム")
         gr.Markdown("時系列データの異常を検出し、LLMエージェントが分析します。")
+        
+        # データおよび結果を保持する状態
+        stored_df = gr.State(None)
+        stored_anomalies = gr.State(None)
         
         # 分析設定
         with gr.Group():
@@ -321,7 +388,7 @@ def create_gradio_ui():
                         step=0.1,
                         info="値が大きいほど検出される異常が少なくなります"
                     )
-            
+
             with gr.Row():
                 with gr.Column():
                     gr.Markdown("### LLM設定")
@@ -361,21 +428,91 @@ def create_gradio_ui():
                 # エージェント分析タブ
                 with gr.TabItem("エージェント分析"):
                     agent_results = gr.HTML("")
+                
+                # 評価タブを追加
+                with gr.TabItem("評価"):
+                    gr.Markdown("### 異常検知の精度評価")
+                    gr.Markdown("既知の異常日付を入力して、検出精度を評価します。")
+                    
+                    with gr.Row():
+                        known_anomalies = gr.Textbox(
+                            label="既知の異常日付（カンマ区切り、YYYY-MM-DD形式）",
+                            placeholder="例: 1987-10-19, 2008-10-13, 2020-03-16",
+                            value="1987-10-19, 2008-10-13, 2020-03-16"  # デフォルト値
+                        )
+                        delay_tolerance = gr.Number(
+                            label="検知遅延許容値（日数）",
+                            value=0,
+                            minimum=0,
+                            step=1,
+                            info="検知が何日遅れても正解とみなすか"
+                        )
+                    
+                    evaluate_btn = gr.Button("評価実行", variant="primary")
+                    
+                    with gr.Accordion("評価指標の解説", open=False):
+                        gr.Markdown("""
+                        ### 評価指標について
+                        
+                        - **適合率（Precision）**: 検出された異常のうち、実際に異常だった割合。値が高いほど誤検知（正常なのに異常と判定）が少ない。
+                        - **再現率（Recall）**: 実際の異常のうち、検出できた割合。値が高いほど見逃しが少ない。
+                        - **F1スコア**: 適合率と再現率の調和平均。総合的な性能指標。
+                        - **Fβスコア**: 再現率をより重視した指標（β=2）。重大な異常を見逃したくない場合に有用。
+                        - **検知遅延**: 実際の異常発生から検出までの平均遅れ時間（日数）。
+                        """)
+                    
+                    gr.Markdown("#### 基本評価指標")
+                    evaluation_metrics = gr.DataFrame()
+                    
+                    gr.Markdown("#### 混同行列")
+                    confusion_matrix_df = gr.DataFrame()
+                    
+                    gr.Markdown("#### 複数手法・閾値の比較")
+                    with gr.Row():
+                        methods_select = gr.CheckboxGroup(
+                            label="検出手法",
+                            choices=["z_score", "iqr", "moving_avg"],
+                            value=["z_score", "iqr", "moving_avg"]
+                        )
+                        thresholds_text = gr.Textbox(
+                            label="閾値（カンマ区切り）",
+                            value="2.0, 2.5, 3.0, 3.5",
+                            placeholder="例: 2.0, 2.5, 3.0, 3.5"
+                        )
+                    
+                    compare_btn = gr.Button("手法比較", variant="secondary")
+                    comparison_results = gr.DataFrame()
         
         # 実行前の状態表示
         def set_running_status():
             return "分析を実行中です。結果が表示されるまでお待ちください..."
         
-        # 分析実行後の結果表示
-        def show_results(plot, count, table, findings):
+        # 分析実行後の結果表示と状態保存
+        def show_results_and_store(plot, count, table, findings, df, anomalies):
             agent_html = format_agent_findings(findings)
             return (
                 "",  # ステータステキストをクリア
                 plot,  # プロット
                 count,  # 異常カウント
                 table,  # 異常テーブル
-                agent_html  # エージェント分析結果
+                agent_html,  # エージェント分析結果
+                df,  # データフレームを状態に保存
+                anomalies  # 異常を状態に保存
             )
+        
+        # 評価ボタンイベント
+        def handle_evaluate(stored_df, stored_anomalies, known_anomalies_str, delay_tolerance):
+            if stored_df is None or stored_anomalies is None:
+                return pd.DataFrame({'エラー': ['先に異常検知を実行してください']}), pd.DataFrame()
+            
+            return run_evaluation(stored_df, stored_anomalies, known_anomalies_str, delay_tolerance)
+        
+        # 手法比較ボタンイベント
+        def handle_compare(stored_df, methods, thresholds_text, known_anomalies_str):
+            if stored_df is None:
+                return pd.DataFrame({'エラー': ['先に異常検知を実行してください']})
+            
+            return compare_methods(stored_df, methods, thresholds_text, known_anomalies_str)
         
         # 実行ボタンイベント
         analyze_btn.click(
@@ -390,11 +527,25 @@ def create_gradio_ui():
                 llm_provider,
                 use_web_agent, use_knowledge_agent, use_crosscheck_agent, use_report_agent, use_manager_agent
             ],
-            outputs=[plot_output, anomaly_count, anomaly_table, agent_results]
+            outputs=[plot_output, anomaly_count, anomaly_table, agent_results, stored_df, stored_anomalies]
         ).then(
-            fn=show_results,
-            inputs=[plot_output, anomaly_count, anomaly_table, agent_results],
-            outputs=[status_text, plot_output, anomaly_count, anomaly_table, agent_results]
+            fn=show_results_and_store,
+            inputs=[plot_output, anomaly_count, anomaly_table, agent_results, stored_df, stored_anomalies],
+            outputs=[status_text, plot_output, anomaly_count, anomaly_table, agent_results, stored_df, stored_anomalies]
+        )
+        
+        # 評価ボタンイベント
+        evaluate_btn.click(
+            fn=handle_evaluate,
+            inputs=[stored_df, stored_anomalies, known_anomalies, delay_tolerance],
+            outputs=[evaluation_metrics, confusion_matrix_df]
+        )
+        
+        # 手法比較ボタンイベント
+        compare_btn.click(
+            fn=handle_compare,
+            inputs=[stored_df, methods_select, thresholds_text, known_anomalies],
+            outputs=comparison_results
         )
     
     return app
