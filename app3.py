@@ -12,7 +12,7 @@ from config import *
 from detection.anomaly_detector import AnomalyDetector
 
 # ユーティリティ関数をインポート
-from utils.data_utils import load_sample_data, save_sample_data
+from utils.data_utils import load_sample_data, save_sample_data, load_multi_indicator_data
 
 # LLMクライアントをインポート
 from utils.llm_clients import OpenAIClient, HuggingFaceClient, MockLLMClient
@@ -27,12 +27,33 @@ from agents.manager_agent import ManagerAgent
 # 評価クラスをインポート
 from evaluation import AnomalyEvaluator
 
+# シグナル生成器と予測モデルをインポート
+from utils.signal_generator import SignalGenerator
+from models.time_series_models import LSTMModel, TimesFMModel
+from models.forecasting_pipeline import ForecastingPipeline
+
 # データを準備
-def prepare_data(use_sample, file_path=None):
+def prepare_data(use_sample, file_path=None, include_extra_indicators=True):
     """データを準備"""
     if use_sample:
         # サンプルデータを使用
-        df = load_sample_data(START_DATE, END_DATE)
+        if include_extra_indicators:
+            # 複数指標を含むデータを読み込む
+            data_dict = load_multi_indicator_data(START_DATE, END_DATE)
+            df = data_dict['sp500']
+            
+            # 追加指標をマージ
+            if 'volume' in data_dict:
+                df = pd.merge(df, data_dict['volume'][['Date', 'Volume']], on='Date', how='left')
+            
+            if 'vix' in data_dict:
+                df = pd.merge(df, data_dict['vix'][['Date', 'VIX']], on='Date', how='left')
+            
+            if 'usdjpy' in data_dict:
+                df = pd.merge(df, data_dict['usdjpy'][['Date', 'USDJPY']], on='Date', how='left')
+        else:
+            # 通常のサンプルデータを読み込む
+            df = load_sample_data(START_DATE, END_DATE)
     else:
         # アップロードされたファイルを使用
         if file_path is None or file_path == "":
@@ -62,10 +83,33 @@ def prepare_data(use_sample, file_path=None):
     return df
 
 # 異常検知を実行
-def detect_anomalies(df, method, threshold):
+def detect_anomalies(df, method, threshold, extra_indicators=None):
     """異常検知を実行"""
-    detector = AnomalyDetector(method=method, threshold=float(threshold))
-    return detector.detect(df)
+    # 追加のパラメータを取得
+    method_params = ANOMALY_PARAMS.get(method, {})
+    
+    # 追加の特徴量を設定
+    extra_features = None
+    if extra_indicators:
+        extra_features = []
+        # 出来高データがあれば追加
+        if 'Volume' in df.columns:
+            # 出来高の特徴量を計算
+            df['volume_ratio'] = df['Volume'] / df['Volume'].rolling(window=20).mean()
+            extra_features.append('volume_ratio')
+        
+        # VIXデータがあれば追加
+        if 'VIX' in df.columns:
+            extra_features.append('VIX')
+        
+        # ドル円データがあれば追加
+        if 'USDJPY' in df.columns:
+            # ドル円の変化率を計算
+            df['usdjpy_pct_change'] = df['USDJPY'].pct_change() * 100
+            extra_features.append('usdjpy_pct_change')
+    
+    detector = AnomalyDetector(method=method, threshold=float(threshold), **method_params)
+    return detector.detect(df, extra_features=extra_features)
 
 # プロットを作成
 def create_plot(df, anomalies):
@@ -100,6 +144,59 @@ def create_plot(df, anomalies):
     
     return fig
 
+# 予測プロットを作成
+def create_forecast_plot(df, anomalies, forecast_df, adjusted_forecast_df):
+    """時系列データ、検出された異常、予測のプロットを作成"""
+    fig = go.Figure()
+    
+    # 元のデータをプロット
+    fig.add_trace(go.Scatter(
+        x=df['Date'],
+        y=df['Close'],
+        mode='lines',
+        name='実際の価格'
+    ))
+    
+    # 異常値をプロット
+    if not anomalies.empty:
+        fig.add_trace(go.Scatter(
+            x=anomalies['Date'],
+            y=anomalies['Close'],
+            mode='markers',
+            marker=dict(color='red', size=10),
+            name='検出された異常'
+        ))
+    
+    # 通常予測をプロット
+    if forecast_df is not None:
+        fig.add_trace(go.Scatter(
+            x=forecast_df['Date'],
+            y=forecast_df['predicted_price'],
+            mode='lines',
+            line=dict(dash='dash', color='blue'),
+            name='基本予測'
+        ))
+    
+    # 異常調整済み予測をプロット
+    if adjusted_forecast_df is not None:
+        fig.add_trace(go.Scatter(
+            x=adjusted_forecast_df['Date'],
+            y=adjusted_forecast_df['predicted_price'],
+            mode='lines',
+            line=dict(color='green'),
+            name='異常調整済み予測'
+        ))
+    
+    fig.update_layout(
+        title='時系列データと将来予測',
+        xaxis_title='日付',
+        yaxis_title='価格',
+        template='plotly_white',
+        height=500
+    )
+    
+    return fig
+
 # LLMクライアントを取得
 def get_llm_client(provider):
     """指定されたプロバイダに基づいてLLMクライアントを取得"""
@@ -111,7 +208,7 @@ def get_llm_client(provider):
         return MockLLMClient()
 
 # エージェントシステムを実行
-def run_agent_system(anomalies, llm_provider, enabled_agents):
+def run_agent_system(anomalies, llm_provider, enabled_agents, reference_data=None):
     """エージェントシステムを実行して結果を返す"""
     # LLMクライアントを取得
     llm_client = get_llm_client(llm_provider)
@@ -139,9 +236,7 @@ def run_agent_system(anomalies, llm_provider, enabled_agents):
     
     # コンテキスト準備
     context = {
-        'reference_data': {
-            # 参照用の追加データがあればここに追加
-        }
+        'reference_data': reference_data if reference_data else {}
     }
     
     # エージェント結果を保存
@@ -177,14 +272,16 @@ def run_agent_system(anomalies, llm_provider, enabled_agents):
 # 分析を実行
 def run_analysis(data_source, file_path, detection_method, threshold, llm_provider, 
                 use_web_agent, use_knowledge_agent, use_crosscheck_agent, 
-                use_report_agent, use_manager_agent):
+                use_report_agent, use_manager_agent, include_extra_indicators=True,
+                generate_signals=True, forecast_days=30):
     try:
         # データを準備
         use_sample = (data_source == "sample")
-        df = prepare_data(use_sample, file_path)
+        df = prepare_data(use_sample, file_path, include_extra_indicators)
         
         # 異常検知を実行
-        anomalies = detect_anomalies(df, detection_method, threshold)
+        anomalies = detect_anomalies(df, detection_method, threshold, 
+                                    include_extra_indicators)
         
         # プロットを作成
         plot = create_plot(df, anomalies)
@@ -212,18 +309,72 @@ def run_analysis(data_source, file_path, detection_method, threshold, llm_provid
         if use_manager_agent:
             enabled_agents.append('manager')
         
+        # 参照データを準備（クロスチェック用）
+        reference_data = {}
+        if include_extra_indicators:
+            # 出来高データがあれば追加
+            if 'Volume' in df.columns:
+                volume_df = df[['Date', 'Volume']].copy()
+                reference_data['volume'] = volume_df
+            
+            # VIXデータがあれば追加
+            if 'VIX' in df.columns:
+                vix_df = df[['Date', 'VIX']].copy()
+                reference_data['vix'] = vix_df
+            
+            # ドル円データがあれば追加
+            if 'USDJPY' in df.columns:
+                usdjpy_df = df[['Date', 'USDJPY']].copy()
+                reference_data['usdjpy'] = usdjpy_df
+        
         # エージェント分析を実行
         agent_findings = {}
         if enabled_agents and not anomalies.empty:
-            agent_findings = run_agent_system(anomalies, llm_provider, enabled_agents)
+            agent_findings = run_agent_system(anomalies, llm_provider, enabled_agents, reference_data)
+        
+        # シグナル生成と予測（オプション）
+        signals_df = None
+        forecast_df = None
+        adjusted_forecast_df = None
+        forecast_plot = None
+        
+        if generate_signals and not anomalies.empty:
+            # シグナル生成と予測パイプラインを実行
+            pipeline = ForecastingPipeline(
+                forecasting_model=FORECASTING_MODEL,
+                signal_threshold=SIGNAL_THRESHOLD,
+                window_size=SIGNAL_WINDOW,
+                lookback=FORECASTING_PARAMS[FORECASTING_MODEL].get('lookback', 60)
+            )
+            
+            signals_df, forecast_df, adjusted_forecast_df = pipeline.process(
+                df, anomalies, 
+                train_model=True, 
+                days_ahead=forecast_days, 
+                adjustment_weight=0.5
+            )
+            
+            # 予測プロットを作成
+            forecast_plot = create_forecast_plot(df, anomalies, forecast_df, adjusted_forecast_df)
+        
+        # シグナルを表として整形
+        signals_table = pd.DataFrame()
+        if signals_df is not None and not signals_df.empty:
+            signals_table = signals_df[signals_df['signal'] != 0][['Date', 'Close', 'pct_change', 'signal', 'anomaly_score']]
+            if not signals_table.empty:
+                signals_table.columns = ['日付', '価格', '変化率 (%)', 'シグナル(-1=売/1=買)', '異常強度']
+                signals_table['日付'] = signals_table['日付'].dt.strftime('%Y-%m-%d')
+                signals_table['変化率 (%)'] = signals_table['変化率 (%)'].round(2)
+                signals_table['異常強度'] = signals_table['異常強度'].round(2)
         
         # 分析結果を返す
-        return plot, f"検出された異常: {len(anomalies)}件", anomalies_df, agent_findings, df, anomalies
+        return plot, forecast_plot, f"検出された異常: {len(anomalies)}件", anomalies_df, signals_table, agent_findings, df, anomalies
         
     except Exception as e:
         import traceback
         error_traceback = traceback.format_exc()
-        return None, f"エラーが発生しました: {str(e)}", pd.DataFrame(), {}, None, None
+        print(error_traceback)
+        return None, None, f"エラーが発生しました: {str(e)}", pd.DataFrame(), pd.DataFrame(), {}, None, None
 
 # エージェント結果をHTMLとして整形
 def format_agent_findings(agent_findings):
@@ -270,6 +421,12 @@ def format_agent_findings(agent_findings):
                     if "llm_analysis" in data:
                         html += f"<h4>日付: {date}</h4>"
                         html += f"<pre style='white-space: pre-wrap;'>{data['llm_analysis']}</pre>"
+                        
+                        # クロスチェックエージェントの場合、追加指標も表示
+                        if agent_name == "クロスチェックエージェント" and "additional_metrics" in data:
+                            html += "<h5>追加指標:</h5>"
+                            html += f"<pre style='white-space: pre-wrap;'>{data['additional_metrics']}</pre>"
+                        
                         html += "<hr>"
             
             html += "</div>"
@@ -365,6 +522,11 @@ def create_gradio_ui():
                         type="filepath",
                         visible=False
                     )
+                    include_extra_indicators = gr.Checkbox(
+                        label="追加指標を含める（出来高、VIX、ドル円）",
+                        value=True,
+                        info="サンプルデータに追加指標を含めるか選択してください"
+                    )
                     
                     # データソースが変更されたときのイベントハンドラ
                     def update_file_visibility(choice):
@@ -376,9 +538,9 @@ def create_gradio_ui():
                     gr.Markdown("### 異常検知設定")
                     detection_method = gr.Dropdown(
                         label="検出方法",
-                        choices=["z_score", "iqr", "moving_avg"],
+                        choices=["z_score", "iqr", "moving_avg", "isolation_forest", "deep_svdd"],
                         value="z_score",
-                        info="Z-scoreは標準偏差ベース、IQRは四分位数ベース、移動平均はトレンドからの乖離を検出します"
+                        info="Z-score: 標準偏差ベース, IQR: 四分位数ベース, 移動平均: トレンドからの乖離, Isolation Forest: 孤立森, Deep SVDD: ディープサポートベクターデータ記述"
                     )
                     threshold = gr.Slider(
                         label="検出閾値",
@@ -407,6 +569,29 @@ def create_gradio_ui():
                     use_report_agent = gr.Checkbox(label="レポート統合エージェント", value=True)
                     use_manager_agent = gr.Checkbox(label="管理者エージェント", value=True)
             
+            with gr.Row():
+                with gr.Column():
+                    gr.Markdown("### 予測設定")
+                    generate_signals = gr.Checkbox(
+                        label="売買シグナルと将来予測を生成",
+                        value=True,
+                        info="異常から売買シグナルを生成し、将来価格を予測します"
+                    )
+                    forecast_days = gr.Slider(
+                        label="予測日数",
+                        minimum=10,
+                        maximum=90,
+                        value=30,
+                        step=5,
+                        info="将来の何日分を予測するか"
+                    )
+                    forecast_model = gr.Radio(
+                        label="予測モデル",
+                        choices=["lstm", "timesfm"],
+                        value=FORECASTING_MODEL,
+                        info="LSTM: 長短期記憶ネットワーク, TimesFM: Transformerベースモデル"
+                    )
+            
             analyze_btn = gr.Button("異常検知を実行", variant="primary")
             status_text = gr.Markdown("")
             
@@ -420,10 +605,19 @@ def create_gradio_ui():
                 with gr.TabItem("プロット"):
                     plot_output = gr.Plot()
                 
+                # 予測プロットタブ
+                with gr.TabItem("予測"):
+                    forecast_plot_output = gr.Plot()
+                
                 # 異常テーブルタブ
                 with gr.TabItem("検出された異常"):
                     anomaly_count = gr.Markdown("")
                     anomaly_table = gr.DataFrame()
+                
+                # シグナルテーブルタブ
+                with gr.TabItem("売買シグナル"):
+                    signals_table_text = gr.Markdown("異常から生成された売買シグナル")
+                    signals_table = gr.DataFrame()
                 
                 # エージェント分析タブ
                 with gr.TabItem("エージェント分析"):
@@ -471,7 +665,7 @@ def create_gradio_ui():
                     with gr.Row():
                         methods_select = gr.CheckboxGroup(
                             label="検出手法",
-                            choices=["z_score", "iqr", "moving_avg"],
+                            choices=["z_score", "iqr", "moving_avg", "isolation_forest", "deep_svdd"],
                             value=["z_score", "iqr", "moving_avg"]
                         )
                         thresholds_text = gr.Textbox(
@@ -488,13 +682,15 @@ def create_gradio_ui():
             return "分析を実行中です。結果が表示されるまでお待ちください..."
         
         # 分析実行後の結果表示と状態保存
-        def show_results_and_store(plot, count, table, findings, df, anomalies):
+        def show_results_and_store(plot, forecast_plot, count, anomalies_table, signals_table, findings, df, anomalies):
             agent_html = format_agent_findings(findings)
             return (
                 "",  # ステータステキストをクリア
                 plot,  # プロット
+                forecast_plot,  # 予測プロット
                 count,  # 異常カウント
-                table,  # 異常テーブル
+                anomalies_table,  # 異常テーブル
+                signals_table,  # シグナルテーブル
                 agent_html,  # エージェント分析結果
                 df,  # データフレームを状態に保存
                 anomalies  # 異常を状態に保存
@@ -525,13 +721,14 @@ def create_gradio_ui():
                 data_source, file_path,
                 detection_method, threshold,
                 llm_provider,
-                use_web_agent, use_knowledge_agent, use_crosscheck_agent, use_report_agent, use_manager_agent
+                use_web_agent, use_knowledge_agent, use_crosscheck_agent, use_report_agent, use_manager_agent,
+                include_extra_indicators, generate_signals, forecast_days
             ],
-            outputs=[plot_output, anomaly_count, anomaly_table, agent_results, stored_df, stored_anomalies]
+            outputs=[plot_output, forecast_plot_output, anomaly_count, anomaly_table, signals_table, agent_results, stored_df, stored_anomalies]
         ).then(
             fn=show_results_and_store,
-            inputs=[plot_output, anomaly_count, anomaly_table, agent_results, stored_df, stored_anomalies],
-            outputs=[status_text, plot_output, anomaly_count, anomaly_table, agent_results, stored_df, stored_anomalies]
+            inputs=[plot_output, forecast_plot_output, anomaly_count, anomaly_table, signals_table, agent_results, stored_df, stored_anomalies],
+            outputs=[status_text, plot_output, forecast_plot_output, anomaly_count, anomaly_table, signals_table, agent_results, stored_df, stored_anomalies]
         )
         
         # 評価ボタンイベント
@@ -547,6 +744,14 @@ def create_gradio_ui():
             inputs=[stored_df, methods_select, thresholds_text, known_anomalies],
             outputs=comparison_results
         )
+        
+        # モデル変更イベント
+        def update_forecasting_model(model):
+            global FORECASTING_MODEL
+            FORECASTING_MODEL = model
+            return None
+        
+        forecast_model.change(fn=update_forecasting_model, inputs=[forecast_model], outputs=[])
     
     return app
 

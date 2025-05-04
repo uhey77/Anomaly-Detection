@@ -39,10 +39,13 @@ class CrossCheckAgent(BaseAgent):
             # 検索用の日付フォーマット
             anomaly_date = date.strftime("%Y-%m-%d")
             
-            # 参照データとのクロスチェック（簡略化）
+            # 参照データとのクロスチェック
             cross_check_results = self._cross_check_with_reference(anomaly_date, reference_data)
             
-            # クロスチェック結果を分析するためのLLMクエリ
+            # 追加指標のチェック
+            additional_metrics = self._check_additional_metrics(anomaly_date, reference_data)
+            
+            # クロスチェック結果と追加指標を分析するためのLLMクエリ
             llm_prompt = f"""
             他の市場指標とクロスチェックして、このS&P 500の異常を分析してください:
             
@@ -53,18 +56,22 @@ class CrossCheckAgent(BaseAgent):
             他の指標とのクロスチェック:
             {cross_check_results}
             
-            このクロスチェックに基づいて、この異常は:
+            追加指標:
+            {additional_metrics}
+            
+            このクロスチェックと追加指標に基づいて、この異常は:
             1. 他の指標によって確認されている（複数の市場が類似したパターンを示している）
             2. S&P 500に限定されている（他の指標は類似したパターンを示していない）
             3. 矛盾している（他の指標は反対のパターンを示している）
             
-            分析し、あなたの推論を説明してください。
+            また、これらの指標から何か特別なパターンや相関関係が見られますか？分析し、あなたの推論を説明してください。
             """
             
             llm_analysis = self.query_llm(llm_prompt)
             
             findings[anomaly_date] = {
                 "cross_check_results": cross_check_results,
+                "additional_metrics": additional_metrics,
                 "llm_analysis": llm_analysis
             }
             
@@ -116,6 +123,53 @@ class CrossCheckAgent(BaseAgent):
                 "NASDAQ: 同様のパターンが観察される",
                 "債券市場に異常な動きなし",
                 "VIX: 重要な変化なし"
+            ]
+            
+        return "\n".join(results)
+    
+    def _check_additional_metrics(self, date, reference_data):
+        """
+        出来高、VIX、ドル円などの追加指標をチェック
+        
+        Args:
+            date (str): 異常の日付
+            reference_data (dict): 参照データソース
+            
+        Returns:
+            str: 追加指標の結果
+        """
+        # 実際のシステムでは本物のデータを使用
+        # ここではモックデータを使用
+        results = []
+        
+        # 特定の既知の異常日のモックデータ
+        if date == "1987-10-19":
+            results = [
+                "出来高: 前日比 +355%（パニック売りを示す異常な取引量）",
+                "VIX: 前日比 +150%（恐怖指数の急上昇）",
+                "ドル円: -3.2%（円高への逃避）",
+                "ゴールド: +2.8%（安全資産への逃避）"
+            ]
+        elif date == "2008-10-13":
+            results = [
+                "出来高: 前日比 +210%（異常な取引量）",
+                "VIX: -16.5%（恐怖指数の急低下）",
+                "ドル円: +2.1%（リスクオンの動き）",
+                "ゴールド: -1.8%（安全資産からの離脱）"
+            ]
+        elif date == "2020-03-16":
+            results = [
+                "出来高: 前日比 +240%（パニック売りを示す異常な取引量）",
+                "VIX: +25%（恐怖指数の過去最高値）",
+                "ドル円: -2.8%（円高への逃避）",
+                "ゴールド: -1.5%（資金流動性確保のための売却）"
+            ]
+        else:
+            results = [
+                "出来高: 通常の範囲内",
+                "VIX: 通常の範囲内",
+                "ドル円: 大きな変動なし",
+                "ゴールド: 大きな変動なし"
             ]
             
         return "\n".join(results)
