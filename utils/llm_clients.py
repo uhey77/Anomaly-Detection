@@ -18,7 +18,7 @@ class OpenAIClient:
             api_key (str, optional): OpenAI APIキー
             model (str, optional): 使用するモデル
         """
-        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.api_key = os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OpenAI APIキーが必要です")
         

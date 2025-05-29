@@ -35,6 +35,10 @@ class SignalGenerator:
         # 異常強度カラムを追加
         signals_df['anomaly_score'] = 0.0
         
+        # pct_changeが含まれていない場合は計算して追加
+        if 'pct_change' not in signals_df.columns:
+            signals_df['pct_change'] = signals_df['Close'].pct_change() * 100
+        
         if not anomalies.empty:
             # 異常データの方向性を判定
             for idx, anomaly in anomalies.iterrows():
@@ -67,8 +71,8 @@ class SignalGenerator:
                             # 下降異常（売りシグナル）
                             signals_df.loc[df_idx, 'signal'] = -1
                         
-                        # 異常スコアを保存
-                        signals_df.loc[df_idx, 'anomaly_score'] = anomaly_score
+                        # 異常スコアを保存 - float32との互換性問題を回避するために明示的に型変換
+                        signals_df.loc[df_idx, 'anomaly_score'] = float(anomaly_score)
                         
                 except IndexError:
                     continue
