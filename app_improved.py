@@ -2059,28 +2059,39 @@ def create_gradio_ui():
             
             return compare_methods(stored_df, methods, thresholds_text, known_anomalies_str)
         
+        stored_agent_findings = gr.State(None)
+
         # 分析実行ボタンのイベント
         analyze_btn.click(
             fn=handle_analyze_click,
             inputs=[
                 data_source, file_path, detection_method, threshold, llm_provider,
-                use_web_agent, use_knowledge_agent, use_crosscheck_agent, 
+                use_web_agent, use_knowledge_agent, use_crosscheck_agent,
                 use_report_agent, use_manager_agent, include_extra_indicators,
                 generate_signals, forecast_days
             ],
             outputs=[
-                plot_output, forecast_plot_output, status_display, metrics_display, 
-                anomaly_table, signals_table, stored_df, stored_anomalies, stored_df
+                plot_output, forecast_plot_output, status_display, metrics_display,
+                anomaly_table, signals_table,
+                stored_agent_findings,   # ← agent_findings をここに
+                stored_df,               # ← df
+                stored_anomalies         # ← anomalies
             ]
         ).then(
             fn=handle_results_display,
             inputs=[
                 plot_output, forecast_plot_output, status_display, metrics_display,
-                anomaly_table, signals_table, stored_df, stored_df, stored_anomalies
+                anomaly_table, signals_table,
+                stored_agent_findings,   # findings
+                stored_df,               # df
+                stored_anomalies         # anomalies
             ],
             outputs=[
                 plot_output, forecast_plot_output, status_display, metrics_display,
-                anomaly_table, signals_table, agent_results, stored_df, stored_anomalies
+                anomaly_table, signals_table,
+                agent_results,           # HTML へ描画
+                stored_df,
+                stored_anomalies
             ]
         )
         
@@ -2106,6 +2117,6 @@ if __name__ == "__main__":
     app.queue().launch(
         share=False,
         server_name="0.0.0.0",
-        server_port=7860,
+        server_port=7861,
         show_error=True
     )
