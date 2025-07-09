@@ -3,8 +3,190 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime
+import yfinance as yf
+from datetime import datetime, timedelta
+import warnings
+warnings.filterwarnings('ignore')
 
-def load_sample_data(start_date="1980-01-01", end_date="2023-12-31"):
+# realtime_data_provider.pyをインポート
+try:
+    from realtime_data_provider import RealTimeDataProvider
+    REALTIME_AVAILABLE = True
+    print("✅ リアルタイムデータプロバイダーが利用可能です")
+except ImportError:
+    REALTIME_AVAILABLE = False
+    print("⚠️ リアルタイムデータプロバイダーが見つかりません。サンプルデータのみ利用可能です")
+
+
+class DataManager:
+    """データ管理クラス（リアルタイム対応）"""
+    
+    def __init__(self):
+        if REALTIME_AVAILABLE:
+            self.rt_provider = RealTimeDataProvider()
+        else:
+            self.rt_provider = None
+    
+    def load_sample_data(self, 
+                        start_date=None, 
+                        end_date=None,
+                        symbol='sp500'):
+        """サンプルデータを取得（リアルタイム対応版）"""
+        
+        # リアルタイムプロバイダーが利用可能な場合
+        if self.rt_provider:
+            try:
+                # 日付の設定
+                if end_date is None:
+                    end_date = datetime.now().strftime('%Y-%m-%d')
+                if start_date is None:
+                    start_date = (datetime.now() - timedelta(days=730)).strftime('%Y-%m-%d')
+                
+                # リアルタイムデータを取得
+                data_dict = self.rt_provider.get_realtime_data([symbol], period="2y")
+                
+                if symbol in data_dict and not data_dict[symbol].empty:
+                    df = data_dict[symbol].copy()
+                    
+                    # 日付フィルタリング
+                    df['Date'] = pd.to_datetime(df['Date'])
+                    start_dt = pd.to_datetime(start_date)
+                    end_dt = pd.to_datetime(end_date)
+                    
+                    df = df[(df['Date'] >= start_dt) & (df['Date'] <= end_dt)]
+                    
+                    if not df.empty:
+                        # データ型を確保
+                        numeric_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+                        for col in numeric_columns:
+                            if col in df.columns:
+                                df[col] = pd.to_numeric(df[col], errors='coerce')
+                        
+                        df = df.dropna(subset=['Close']).reset_index(drop=True)
+                        print(f"✅ リアルタイムデータ取得完了: {symbol} ({len(df)}件)")
+                        return df
+                
+            except Exception as e:
+                print(f"⚠️ リアルタイムデータ取得エラー: {e}")
+        
+        # フォールバック: 既存のサンプルデータ生成
+        print("📊 フォールバックデータを生成中...")
+        return self._generate_fallback_data(start_date, end_date)
+    
+    def load_multi_indicator_data(self, 
+                                 start_date=None,
+                                 end_date=None,
+                                 symbols=None):
+        """複数指標のデータを取得（リアルタイム対応版）"""
+        
+        if symbols is None:
+            symbols = ['sp500', 'vix', 'usdjpy', 'gold', 'nasdaq']
+        
+        if self.rt_provider:
+            try:
+                # リアルタイムデータを取得
+                data_dict = self.rt_provider.get_realtime_data(symbols, period="2y")
+                
+                # 日付でフィルタリング
+                if start_date and end_date:
+                    start_dt = pd.to_datetime(start_date)
+                    end_dt = pd.to_datetime(end_date)
+                    
+                    for symbol in data_dict:
+                        df = data_dict[symbol]
+                        df['Date'] = pd.to_datetime(df['Date'])
+                        data_dict[symbol] = df[(df['Date'] >= start_dt) & (df['Date'] <= end_dt)]
+                
+                # 既存形式との互換性のため名前をマッピング
+                result = {}
+                
+                # メインデータ（S&P500）
+                if 'sp500' in data_dict and not data_dict['sp500'].empty:
+                    result['sp500'] = data_dict['sp500']
+                    
+                    # 出来高データ
+                    volume_df = data_dict['sp500'][['Date', 'Volume']].copy()
+                    result['volume'] = volume_df
+                
+                # VIXデータ
+                if 'vix' in data_dict and not data_dict['vix'].empty:
+                    vix_df = data_dict['vix'][['Date', 'Close']].copy()
+                    vix_df = vix_df.rename(columns={'Close': 'VIX'})
+                    result['vix'] = vix_df
+                
+                # USD/JPYデータ
+                if 'usdjpy' in data_dict and not data_dict['usdjpy'].empty:
+                    usdjpy_df = data_dict['usdjpy'][['Date', 'Close']].copy()
+                    usdjpy_df = usdjpy_df.rename(columns={'Close': 'USDJPY'})
+                    result['usdjpy'] = usdjpy_df
+                
+                # その他のデータ
+                for symbol in ['gold', 'nasdaq']:
+                    if symbol in data_dict and not data_dict[symbol].empty:
+                        result[symbol] = data_dict[symbol]
+                
+                print(f"✅ 複数指標データ取得完了: {len(result)}個の指標")
+                return result
+                
+            except Exception as e:
+                print(f"⚠️ 複数指標データ取得エラー: {e}")
+        
+        # フォールバック: 既存の関数を呼び出し
+        return load_multi_indicator_data_original(start_date, end_date)
+    
+    def _generate_fallback_data(self, start_date=None, end_date=None):
+        """フォールバック用のサンプルデータ生成"""
+        print("📈 サンプルデータを生成中...")
+        
+        if end_date is None:
+            end_date = datetime.now()
+        else:
+            end_date = pd.to_datetime(end_date)
+            
+        if start_date is None:
+            start_date = end_date - timedelta(days=730)
+        else:
+            start_date = pd.to_datetime(start_date)
+        
+        # 日付範囲を生成
+        dates = pd.date_range(start=start_date, end=end_date, freq='D')
+        
+        # S&P500のような価格データを模擬
+        np.random.seed(42)
+        n_days = len(dates)
+        
+        # 初期価格
+        initial_price = 4000.0
+        
+        # ランダムウォーク + トレンド
+        returns = np.random.normal(0.0008, 0.02, n_days)
+        returns[0] = 0
+        
+        prices = [initial_price]
+        for i in range(1, n_days):
+            new_price = prices[-1] * (1 + returns[i])
+            prices.append(max(new_price, 1.0))
+        
+        # OHLC価格を生成
+        closes = np.array(prices)
+        opens = np.concatenate([[closes[0]], closes[:-1]])
+        highs = closes * (1 + np.abs(np.random.normal(0, 0.01, n_days)))
+        lows = closes * (1 - np.abs(np.random.normal(0, 0.01, n_days)))
+        volumes = np.random.randint(1000000, 10000000, n_days)
+        
+        df = pd.DataFrame({
+            'Date': dates,
+            'Open': opens,
+            'High': highs,
+            'Low': lows,
+            'Close': closes,
+            'Volume': volumes
+        })
+        
+        return df
+
+
+def load_sample_data_original(start_date="1980-01-01", end_date="2023-12-31"):
     """
     サンプルのS&P 500データを生成
     
@@ -55,6 +237,11 @@ def load_sample_data(start_date="1980-01-01", end_date="2023-12-31"):
     })
     
     return df
+
+def load_sample_data(start_date=None, end_date=None):
+    """既存関数の互換性維持（リアルタイム対応）"""
+    manager = DataManager()
+    return manager.load_sample_data(start_date, end_date)
 
 def save_sample_data(df, filename="sp500_sample.csv"):
     """
@@ -107,7 +294,7 @@ def plot_anomalies(data, anomalies, output_file=None):
     else:
         plt.show()
 
-def load_multi_indicator_data(start_date="1980-01-01", end_date="2023-12-31", include_mock_indicators=True):
+def load_multi_indicator_data_original(start_date="1980-01-01", end_date="2023-12-31", include_mock_indicators=True):
     """
     複数の指標を含むデータを生成
     
@@ -218,3 +405,8 @@ def load_multi_indicator_data(start_date="1980-01-01", end_date="2023-12-31", in
         data_dict['usdjpy'] = usdjpy_df
     
     return data_dict
+
+def load_multi_indicator_data(start_date=None, end_date=None):
+    """既存関数の互換性維持（リアルタイム対応）"""
+    manager = DataManager()
+    return manager.load_multi_indicator_data(start_date, end_date)

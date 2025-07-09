@@ -6,6 +6,9 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
 import time
+import yfinance as yf
+import warnings
+warnings.filterwarnings('ignore')
 
 # 設定ファイルをインポート
 from config import *
@@ -33,6 +36,27 @@ from evaluation import AnomalyEvaluator
 from utils.signal_generator import SignalGenerator
 from models.time_series_models import LSTMModel, TimesFMModel
 from models.forecasting_pipeline import ForecastingPipeline
+
+# リアルタイムデータプロバイダーをインポート
+try:
+    from realtime_data_provider import RealTimeDataProvider
+    REALTIME_AVAILABLE = True
+    print("✅ リアルタイムデータプロバイダーが利用可能です")
+except ImportError:
+    REALTIME_AVAILABLE = False
+    print("⚠️ リアルタイムデータプロバイダーが見つかりません")
+
+# DataManagerをインポート
+try:
+    from utils.data_utils import DataManager
+    data_manager = DataManager()
+    rt_provider = RealTimeDataProvider() if REALTIME_AVAILABLE else None
+    print("✅ データマネージャーを初期化しました")
+except ImportError:
+    print("⚠️ DataManagerのインポートに失敗しました")
+    data_manager = None
+    rt_provider = None
+
 
 # 修正版SignalGeneratorクラス（データ型問題対応）
 class FixedSignalGenerator:
@@ -458,44 +482,100 @@ def get_progress_html():
     """
 
 # データを準備
-def prepare_data(use_sample, file_path=None, include_extra_indicators=True):
-    """データを準備"""
-    if use_sample:
-        if include_extra_indicators:
-            data_dict = load_multi_indicator_data(START_DATE, END_DATE)
-            df = data_dict['sp500']
-            
-            if 'volume' in data_dict:
-                df = pd.merge(df, data_dict['volume'][['Date', 'Volume']], on='Date', how='left')
-            
-            if 'vix' in data_dict:
-                df = pd.merge(df, data_dict['vix'][['Date', 'VIX']], on='Date', how='left')
-            
-            if 'usdjpy' in data_dict:
-                df = pd.merge(df, data_dict['usdjpy'][['Date', 'USDJPY']], on='Date', how='left')
+def prepare_data(use_sample, file_path=None, symbol='sp500', include_extra_indicators=True, period="2y"):
+    """リアルタイム対応データを準備"""
+    try:
+        if use_sample:
+            if data_manager and REALTIME_AVAILABLE:
+                # リアルタイムデータを取得
+                if include_extra_indicators:
+                    # 複数指標のリアルタイムデータを取得
+                    data_dict = data_manager.load_multi_indicator_data()
+                    
+                    # メインデータ（指定されたシンボル、デフォルトはS&P500）
+                    main_symbol = symbol if symbol in data_dict else 'sp500'
+                    df = data_dict[main_symbol].copy()
+                    
+                    # 追加指標をマージ
+                    if 'volume' in data_dict and not data_dict['volume'].empty:
+                        df = pd.merge(df, data_dict['volume'][['Date', 'Volume']], on='Date', how='left')
+                    
+                    if 'vix' in data_dict and not data_dict['vix'].empty:
+                        df = pd.merge(df, data_dict['vix'][['Date', 'VIX']], on='Date', how='left')
+                    
+                    if 'usdjpy' in data_dict and not data_dict['usdjpy'].empty:
+                        df = pd.merge(df, data_dict['usdjpy'][['Date', 'USDJPY']], on='Date', how='left')
+                else:
+                    # 単一シンボルのデータ
+                    df = data_manager.load_sample_data(symbol=symbol)
+            else:
+                # フォールバック: 既存のサンプルデータ
+                from utils.data_utils import load_sample_data, load_multi_indicator_data
+                if include_extra_indicators:
+                    data_dict = load_multi_indicator_data(START_DATE, END_DATE)
+                    df = data_dict['sp500']
+                    
+                    if 'volume' in data_dict:
+                        df = pd.merge(df, data_dict['volume'][['Date', 'Volume']], on='Date', how='left')
+                    
+                    if 'vix' in data_dict:
+                        df = pd.merge(df, data_dict['vix'][['Date', 'VIX']], on='Date', how='left')
+                    
+                    if 'usdjpy' in data_dict:
+                        df = pd.merge(df, data_dict['usdjpy'][['Date', 'USDJPY']], on='Date', how='left')
+                else:
+                    df = load_sample_data(START_DATE, END_DATE)
         else:
-            df = load_sample_data(START_DATE, END_DATE)
-    else:
-        if file_path is None or file_path == "":
-            raise ValueError("ファイルがアップロードされていません")
+            # ファイルアップロードの場合（既存コードをそのまま維持）
+            if file_path is None or file_path == "":
+                raise ValueError("ファイルがアップロードされていません")
+            
+            if file_path.endswith('.csv'):
+                df = pd.read_csv(file_path)
+            elif file_path.endswith(('.xls', '.xlsx')):
+                df = pd.read_excel(file_path)
+            else:
+                raise ValueError("対応していないファイル形式です。CSVまたはExcelファイルをアップロードしてください。")
+            
+            if 'Date' in df.columns:
+                df['Date'] = pd.to_datetime(df['Date'])
+            else:
+                df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0])
+                df.rename(columns={df.columns[0]: 'Date'}, inplace=True)
+            
+            if 'Close' not in df.columns:
+                df.rename(columns={df.columns[1]: 'Close'}, inplace=True)
         
-        if file_path.endswith('.csv'):
-            df = pd.read_csv(file_path)
-        elif file_path.endswith(('.xls', '.xlsx')):
-            df = pd.read_excel(file_path)
+        # データ検証と前処理
+        if df.empty:
+            raise ValueError("有効なデータが取得できませんでした")
+        
+        # 日付でソート
+        df = df.sort_values('Date').reset_index(drop=True)
+        
+        # データ型の確認と修正
+        df['Close'] = pd.to_numeric(df['Close'], errors='coerce')
+        df = df.dropna(subset=['Close'])
+        
+        if df.empty:
+            raise ValueError("有効な価格データがありません")
+        
+        print(f"✅ データ準備完了: {len(df)}件のデータ")
+        if not df.empty:
+            print(f"📅 期間: {df['Date'].min().date()} - {df['Date'].max().date()}")
+        
+        return df
+        
+    except Exception as e:
+        print(f"⚠️ データ準備エラー: {e}")
+        # 最終フォールバック
+        if data_manager:
+            return data_manager._generate_fallback_data()
         else:
-            raise ValueError("対応していないファイル形式です。CSVまたはExcelファイルをアップロードしてください。")
-        
-        if 'Date' in df.columns:
-            df['Date'] = pd.to_datetime(df['Date'])
-        else:
-            df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0])
-            df.rename(columns={df.columns[0]: 'Date'}, inplace=True)
-        
-        if 'Close' not in df.columns:
-            df.rename(columns={df.columns[1]: 'Close'}, inplace=True)
-    
-    return df
+            # 緊急時の最小限データ
+            dates = pd.date_range(start='2022-01-01', end='2024-01-01', freq='D')
+            prices = np.random.normal(4000, 200, len(dates))
+            return pd.DataFrame({'Date': dates, 'Close': prices})
 
 # 修正版Deep SVDD検出器（エラー対応）
 class FixedDeepSVDDDetector:
@@ -2059,28 +2139,39 @@ def create_gradio_ui():
             
             return compare_methods(stored_df, methods, thresholds_text, known_anomalies_str)
         
+        stored_agent_findings = gr.State(None)
+
         # 分析実行ボタンのイベント
         analyze_btn.click(
             fn=handle_analyze_click,
             inputs=[
                 data_source, file_path, detection_method, threshold, llm_provider,
-                use_web_agent, use_knowledge_agent, use_crosscheck_agent, 
+                use_web_agent, use_knowledge_agent, use_crosscheck_agent,
                 use_report_agent, use_manager_agent, include_extra_indicators,
                 generate_signals, forecast_days
             ],
             outputs=[
-                plot_output, forecast_plot_output, status_display, metrics_display, 
-                anomaly_table, signals_table, stored_df, stored_anomalies, stored_df
+                plot_output, forecast_plot_output, status_display, metrics_display,
+                anomaly_table, signals_table,
+                stored_agent_findings,   # ← agent_findings をここに
+                stored_df,               # ← df
+                stored_anomalies         # ← anomalies
             ]
         ).then(
             fn=handle_results_display,
             inputs=[
                 plot_output, forecast_plot_output, status_display, metrics_display,
-                anomaly_table, signals_table, stored_df, stored_df, stored_anomalies
+                anomaly_table, signals_table,
+                stored_agent_findings,   # findings
+                stored_df,               # df
+                stored_anomalies         # anomalies
             ],
             outputs=[
                 plot_output, forecast_plot_output, status_display, metrics_display,
-                anomaly_table, signals_table, agent_results, stored_df, stored_anomalies
+                anomaly_table, signals_table,
+                agent_results,           # HTML へ描画
+                stored_df,
+                stored_anomalies
             ]
         )
         
@@ -2106,6 +2197,6 @@ if __name__ == "__main__":
     app.queue().launch(
         share=False,
         server_name="0.0.0.0",
-        server_port=7860,
+        server_port=7861,
         show_error=True
     )

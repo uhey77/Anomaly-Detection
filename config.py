@@ -77,3 +77,52 @@ ENABLE_CROSSCHECK_AGENT = True  # クロスチェックエージェントを有�
 ENABLE_REPORT_AGENT = True  # レポート統合エージェントを有効にする
 ENABLE_MANAGER_AGENT = True  # 管理者エージェントを有効にする
 
+
+# =============================================================================
+# リアルタイムデータ設定（追加）
+# =============================================================================
+
+# Yahoo Finance設定
+YFINANCE_CONFIG = {
+    'timeout': 30,
+    'retry_count': 3,
+    'retry_delay': 1,
+    'cache_duration': 300,  # 5分
+}
+
+# サポートする期間とインターバル
+SUPPORTED_PERIODS = ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y", "10y", "ytd", "max"]
+SUPPORTED_INTERVALS = ["1m", "2m", "5m", "15m", "30m", "60m", "90m", "1h", "1d", "5d", "1wk", "1mo", "3mo"]
+
+# リアルタイム対応でANOMALY_PARAMSの一部を調整（既存があれば上書き）
+ANOMALY_PARAMS.update({
+    'isolation_forest': {
+        'contamination': 0.1,
+        'n_estimators': 50,  # 高速化のため削減
+        'random_state': 42,
+        'max_samples': 'auto',
+        'max_features': 1.0
+    },
+    'deep_svdd': {
+        'threshold': 0.95,
+        'epochs': 20,  # 高速化のため削減
+        'batch_size': 16,
+        'learning_rate': 0.001,
+        'random_state': 42
+    }
+})
+
+# キャッシュ設定
+CACHE_CONFIG = {
+    'enable_cache': True,
+    'cache_dir': './cache',
+    'cache_ttl': 300,  # 5分
+}
+
+# リアルタイムUI設定
+REALTIME_UI_CONFIG = {
+    'auto_refresh': False,
+    'refresh_interval': 60,  # 秒
+    'max_symbols': 20,
+    'enable_alerts': False,
+}
