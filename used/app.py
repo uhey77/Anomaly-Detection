@@ -501,21 +501,24 @@ def anomaly_detection_app(
         return status_update, error_html
 
 # Gradio UIの作成
+CUSTOM_CSS = """
+#result_container {
+    width: 100%;
+    min-height: 600px;
+}
+.full-width {
+    width: 100% !important;
+}
+iframe {
+    width: 100%;
+    height: 800px;
+    border: none;
+}
+"""
+
+
 def create_gradio_ui():
-    with gr.Blocks(title="異常検知分析システム", theme=gr.themes.Base(), css="""
-        #result_container {
-            width: 100%;
-            min-height: 600px;
-        }
-        .full-width {
-            width: 100% !important;
-        }
-        iframe {
-            width: 100%;
-            height: 800px;
-            border: none;
-        }
-    """) as app:
+    with gr.Blocks(title="異常検知分析システム") as app:
         gr.Markdown("# マルチエージェントLLM異常検知分析システム")
         gr.Markdown("時系列データの異常を検出し、LLMエージェントが分析します。")
         
@@ -604,4 +607,4 @@ def create_gradio_ui():
 # メイン処理
 if __name__ == "__main__":
     app = create_gradio_ui()
-    app.launch(share=False)
+    app.launch(share=False, theme=gr.themes.Base(), css=CUSTOM_CSS)

@@ -656,12 +656,14 @@ class FixedDeepSVDDDetector:
             
             # シンプルなオートエンコーダー
             encoder = tf.keras.Sequential([
-                tf.keras.layers.Dense(max(2, input_dim // 2), activation='relu', input_shape=(input_dim,)),
+                tf.keras.Input(shape=(input_dim,)),
+                tf.keras.layers.Dense(max(2, input_dim // 2), activation='relu'),
                 tf.keras.layers.Dense(2, activation='linear')  # 2次元の潜在空間
             ])
             
             decoder = tf.keras.Sequential([
-                tf.keras.layers.Dense(max(2, input_dim // 2), activation='relu', input_shape=(2,)),
+                tf.keras.Input(shape=(2,)),
+                tf.keras.layers.Dense(max(2, input_dim // 2), activation='relu'),
                 tf.keras.layers.Dense(input_dim, activation='linear')
             ])
             
@@ -1852,13 +1854,7 @@ def compare_methods(df, methods, thresholds_text, known_anomalies_str):
 # Gradio UIの作成
 def create_gradio_ui():
     with gr.Blocks(
-        title="🔍 マルチエージェントLLM異常検知分析システム",
-        css=CUSTOM_CSS,
-        theme=gr.themes.Soft(
-            primary_hue="blue",
-            secondary_hue="green",
-            neutral_hue="gray"
-        )
+        title="🔍 マルチエージェントLLM異常検知分析システム"
     ) as app:
         
         # ヘッダー
@@ -2198,5 +2194,11 @@ if __name__ == "__main__":
         share=False,
         server_name="0.0.0.0",
         server_port=7861,
-        show_error=True
+        show_error=True,
+        css=CUSTOM_CSS,
+        theme=gr.themes.Soft(
+            primary_hue="blue",
+            secondary_hue="green",
+            neutral_hue="gray"
+        )
     )
