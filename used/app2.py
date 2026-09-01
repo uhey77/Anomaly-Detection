@@ -362,7 +362,7 @@ def run_analysis(
 
 # Gradio UIの作成
 def create_gradio_ui():
-    with gr.Blocks(title="異常検知分析システム", theme=gr.themes.Base()) as app:
+    with gr.Blocks(title="異常検知分析システム") as app:
         gr.Markdown("# マルチエージェントLLM異常検知分析システム")
         gr.Markdown("時系列データの異常を検出し、LLMエージェントが分析します。")
         
@@ -461,4 +461,4 @@ def create_gradio_ui():
 # メイン処理
 if __name__ == "__main__":
     app = create_gradio_ui()
-    app.queue().launch(share=False)
+    app.queue().launch(share=False, theme=gr.themes.Base())

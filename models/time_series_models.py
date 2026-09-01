@@ -85,7 +85,8 @@ class LSTMModel(TimeSeriesModel):
             lookback (int): 遡る期間
         """
         model = Sequential()
-        model.add(LSTM(units=self.units, return_sequences=True, input_shape=(lookback, 1)))
+        model.add(tf.keras.Input(shape=(lookback, 1)))
+        model.add(LSTM(units=self.units, return_sequences=True))
         model.add(Dropout(self.dropout))
         model.add(LSTM(units=self.units))
         model.add(Dropout(self.dropout))
