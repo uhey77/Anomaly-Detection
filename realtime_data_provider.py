@@ -1,30 +1,28 @@
-import yfinance as yf
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
+import logging
 import time
-import requests
-from typing import Dict, List, Optional, Tuple
-import warnings
+from datetime import datetime, timedelta
+from typing import ClassVar
 
-warnings.filterwarnings("ignore")
+import pandas as pd
+import yfinance as yf
+
+logger = logging.getLogger(__name__)
 
 
 class RealTimeDataProvider:
     """リアルタイム金融データ提供クラス"""
 
     # 主要な銘柄・指数の定義
-    SYMBOLS = {
+    SYMBOLS: ClassVar[dict[str, str]] = {
         # 主要株価指数
-        "sp500": "^GSPC",       # S&P 500
-        "nasdaq": "^IXIC",      # NASDAQ
-        "dow": "^DJI",          # ダウ平均
+        "sp500": "^GSPC",  # S&P 500
+        "nasdaq": "^IXIC",  # NASDAQ
+        "dow": "^DJI",  # ダウ平均
         "russell2000": "^RUT",  # Russell 2000
-        "nikkei": "^N225",      # 日経平均
-        "ftse": "^FTSE",        # FTSE 100
-        "dax": "^GDAXI",        # DAX
-        "cac40": "^FCHI",       # CAC 40
-
+        "nikkei": "^N225",  # 日経平均
+        "ftse": "^FTSE",  # FTSE 100
+        "dax": "^GDAXI",  # DAX
+        "cac40": "^FCHI",  # CAC 40
         # 主要個別株
         "apple": "AAPL",
         "microsoft": "MSFT",
@@ -36,48 +34,42 @@ class RealTimeDataProvider:
         "berkshire": "BRK-A",
         "toyota": "TM",
         "asml": "ASML",
-
         # 商品
-        "gold": "GC=F",          # 金先物
-        "silver": "SI=F",        # 銀先物
-        "oil_wti": "CL=F",       # WTI原油
-        "oil_brent": "BZ=F",     # ブレント原油
-        "natural_gas": "NG=F",   # 天然ガス
-        "copper": "HG=F",        # 銅
-
+        "gold": "GC=F",  # 金先物
+        "silver": "SI=F",  # 銀先物
+        "oil_wti": "CL=F",  # WTI原油
+        "oil_brent": "BZ=F",  # ブレント原油
+        "natural_gas": "NG=F",  # 天然ガス
+        "copper": "HG=F",  # 銅
         # 通貨
-        "usdjpy": "JPY=X",       # ドル円
-        "eurusd": "EURUSD=X",    # ユーロドル
-        "gbpusd": "GBPUSD=X",    # ポンドドル
-        "usdcad": "USDCAD=X",    # ドルカナダ
-        "audusd": "AUDUSD=X",    # オーストラリアドル
+        "usdjpy": "JPY=X",  # ドル円
+        "eurusd": "EURUSD=X",  # ユーロドル
+        "gbpusd": "GBPUSD=X",  # ポンドドル
+        "usdcad": "USDCAD=X",  # ドルカナダ
+        "audusd": "AUDUSD=X",  # オーストラリアドル
         "usdjpy_inverted": "JPYUSD=X",  # 円ドル
-
         # 債券
-        "us_10y": "^TNX",        # 10年米国債
-        "us_30y": "^TYX",        # 30年米国債
-        "us_2y": "^IRX",         # 2年米国債
-        "de_10y": "^TNX",        # ドイツ10年債（代替）
-
+        "us_10y": "^TNX",  # 10年米国債
+        "us_30y": "^TYX",  # 30年米国債
+        "us_2y": "^IRX",  # 2年米国債
+        "de_10y": "^TNX",  # ドイツ10年債（代替）
         # 暗号通貨
         "bitcoin": "BTC-USD",
         "ethereum": "ETH-USD",
-
         # セクターETF
-        "tech_etf": "XLK",       # テクノロジー
-        "finance_etf": "XLF",    # 金融
-        "energy_etf": "XLE",     # エネルギー
-        "healthcare_etf": "XLV", # ヘルスケア
-        "consumer_etf": "XLY",   # 消費財
-
+        "tech_etf": "XLK",  # テクノロジー
+        "finance_etf": "XLF",  # 金融
+        "energy_etf": "XLE",  # エネルギー
+        "healthcare_etf": "XLV",  # ヘルスケア
+        "consumer_etf": "XLY",  # 消費財
         # 恐怖指数・ボラティリティ
-        "vix": "^VIX",           # VIX恐怖指数
-        "vxn": "^VXN",           # NASDAQ VIX
-        "rvx": "^RVX",           # Russell 2000 VIX
+        "vix": "^VIX",  # VIX恐怖指数
+        "vxn": "^VXN",  # NASDAQ VIX
+        "rvx": "^RVX",  # Russell 2000 VIX
     }
 
     # デフォルトで取得する主要シンボル
-    DEFAULT_SYMBOLS = [
+    DEFAULT_SYMBOLS: ClassVar[tuple[str, ...]] = (
         "sp500",
         "nasdaq",
         "dow",
@@ -93,7 +85,7 @@ class RealTimeDataProvider:
         "bitcoin",
         "vix",
         "us_10y",
-    ]
+    )
 
     def __init__(self, cache_duration_minutes: int = 5) -> None:
         """
@@ -101,8 +93,8 @@ class RealTimeDataProvider:
             cache_duration_minutes: データキャッシュの有効期間（分）
         """
         self.cache_duration = timedelta(minutes=cache_duration_minutes)
-        self.data_cache: Dict[str, pd.DataFrame] = {}
-        self.last_update: Dict[str, datetime] = {}
+        self.data_cache: dict[str, pd.DataFrame] = {}
+        self.last_update: dict[str, datetime] = {}
 
     # ------------------------------------------------------------------ #
     # 内部ユーティリティ
@@ -148,8 +140,8 @@ class RealTimeDataProvider:
             volume_ma = df["Volume"].rolling(window=20, min_periods=1).mean()
             df["volume_ratio"] = df["Volume"] / (volume_ma + 1e-8)
 
-        except Exception as e:  # noqa: BLE001
-            print(f"技術指標の計算でエラーが発生しました: {e}")
+        except Exception:  # yfinance由来のさまざまな入力形式を扱う
+            logger.exception("技術指標の計算に失敗しました")
 
         return df
 
@@ -158,10 +150,10 @@ class RealTimeDataProvider:
     # ------------------------------------------------------------------ #
     def get_realtime_data(
         self,
-        symbols: Optional[List[str]] = None,
+        symbols: list[str] | None = None,
         period: str = "2y",
         interval: str = "1d",
-    ) -> Dict[str, pd.DataFrame]:
+    ) -> dict[str, pd.DataFrame]:
         """
         リアルタイムデータを取得
 
@@ -173,12 +165,12 @@ class RealTimeDataProvider:
         Returns:
             Dict[str, pd.DataFrame]: シンボル名をキーとするデータフレーム辞書
         """
-        symbols = symbols or self.DEFAULT_SYMBOLS
-        data_dict: Dict[str, pd.DataFrame] = {}
+        requested_symbols = symbols or self.DEFAULT_SYMBOLS
+        data_dict: dict[str, pd.DataFrame] = {}
 
-        for symbol_name in symbols:
+        for symbol_name in requested_symbols:
             if symbol_name not in self.SYMBOLS:
-                print(f"警告: 未知のシンボル '{symbol_name}' をスキップします")
+                logger.warning("未知のシンボル '%s' をスキップします", symbol_name)
                 continue
 
             ticker_symbol = self.SYMBOLS[symbol_name]
@@ -194,7 +186,7 @@ class RealTimeDataProvider:
                 hist_data = ticker.history(period=period, interval=interval)
 
                 if hist_data.empty:
-                    print(f"警告: {symbol_name} のデータが取得できませんでした")
+                    logger.warning("%s のデータが取得できませんでした", symbol_name)
                     continue
 
                 df = hist_data.reset_index()
@@ -214,14 +206,12 @@ class RealTimeDataProvider:
 
                 # 型変換
                 numeric_columns = ["Open", "High", "Low", "Close", "Volume"]
-                df[numeric_columns] = df[numeric_columns].apply(
-                    pd.to_numeric, errors="coerce"
-                )
+                df[numeric_columns] = df[numeric_columns].apply(pd.to_numeric, errors="coerce")
 
                 # NaN 除去
                 df = df.dropna(subset=["Close"])
                 if df.empty:
-                    print(f"警告: {symbol_name} の有効なデータがありません")
+                    logger.warning("%s の有効なデータがありません", symbol_name)
                     continue
 
                 # 指標付与
@@ -234,18 +224,18 @@ class RealTimeDataProvider:
 
                 time.sleep(0.1)  # API 制限対策
 
-            except Exception as e:  # noqa: BLE001
-                print(f"エラー: {symbol_name} のデータ取得中にエラーが発生しました: {e}")
+            except Exception:  # yfinanceの通信・解析例外をシンボル単位で隔離する
+                logger.exception("%s のデータ取得に失敗しました", symbol_name)
 
         return data_dict
 
-    def get_market_summary(self) -> Dict[str, Dict]:
+    def get_market_summary(self) -> dict[str, dict]:
         """市場サマリーを取得"""
         try:
             major_indices = ["sp500", "nasdaq", "dow", "nikkei", "vix"]
             data = self.get_realtime_data(major_indices, period="5d", interval="1d")
 
-            summary: Dict[str, Dict] = {}
+            summary: dict[str, dict] = {}
             for symbol, df in data.items():
                 if df.empty:
                     continue
@@ -270,8 +260,8 @@ class RealTimeDataProvider:
 
             return summary
 
-        except Exception as e:  # noqa: BLE001
-            print(f"市場サマリー取得エラー: {e}")
+        except Exception:  # yfinance由来の例外は空のサマリーにフォールバックする
+            logger.exception("市場サマリーの取得に失敗しました")
             return {}
 
     def get_intraday_data(
@@ -301,18 +291,18 @@ class RealTimeDataProvider:
 
             return self._add_technical_indicators(df)
 
-        except Exception as e:  # noqa: BLE001
-            print(f"イントラデイデータ取得エラー ({symbol}): {e}")
+        except Exception:  # yfinance由来の例外は空データにフォールバックする
+            logger.exception("イントラデイデータの取得に失敗しました: %s", symbol)
             return pd.DataFrame()
 
     # ------------------------------------------------------------------ #
     # 便利ユーティリティ
     # ------------------------------------------------------------------ #
-    def get_available_symbols(self) -> Dict[str, str]:
+    def get_available_symbols(self) -> dict[str, str]:
         """利用可能なシンボル一覧を取得"""
         return self.SYMBOLS.copy()
 
-    def validate_market_hours(self) -> Dict[str, bool]:
+    def validate_market_hours(self) -> dict[str, bool]:
         """主要市場の取引時間をチェック（簡易版）"""
         now = datetime.now()
 
@@ -334,40 +324,3 @@ class RealTimeDataProvider:
     def _is_europe_market_open(self, dt: datetime) -> bool:
         """欧州市場の開場状況（平日のみ・祝日判定なし）"""
         return dt.weekday() < 5
-
-
-# ---------------------------------------------------------------------- #
-# テストスクリプト
-# ---------------------------------------------------------------------- #
-def test_realtime_data_provider() -> None:
-    provider = RealTimeDataProvider()
-
-    print("=== リアルタイムデータプロバイダーテスト ===")
-
-    # 1. 基本データ取得
-    print("\n1. 主要指数データ取得テスト")
-    data = provider.get_realtime_data(["sp500", "nasdaq", "vix"], period="1mo")
-    for symbol, df in data.items():
-        if not df.empty:
-            latest = df.iloc[-1]
-            print(f"{symbol}: 最新価格 {latest['Close']:.2f}, 日付 {latest['Date']}")
-
-    # 2. 市場サマリー
-    print("\n2. 市場サマリーテスト")
-    summary = provider.get_market_summary()
-    for symbol, info in summary.items():
-        print(f"{symbol}: {info['current_price']:.2f} ({info['change_pct']:+.2f}%)")
-
-    # 3. 利用可能シンボル
-    print(f"\n3. 利用可能シンボル数: {len(provider.get_available_symbols())}")
-
-    # 4. 市場開場状況
-    print("\n4. 市場開場状況")
-    market_status = provider.validate_market_hours()
-    for market, is_open in market_status.items():
-        status = "開場中" if is_open else "閉場中"
-        print(f"{market}: {status}")
-
-
-if __name__ == "__main__":
-    test_realtime_data_provider()

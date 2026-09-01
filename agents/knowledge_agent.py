@@ -1,39 +1,40 @@
 from .base_agent import BaseAgent
 
+
 class KnowledgeBaseAgent(BaseAgent):
     """金融市場に関するドメイン知識を提供するエージェント"""
-    
+
     def __init__(self, name="知識ベースエージェント", llm_client=None):
         """
         知識ベースエージェントを初期化
-        
+
         Args:
             name (str): エージェント名
             llm_client: LLMクライアントインスタンス
         """
         super().__init__(name, llm_client)
-        
+
     def process(self, anomaly_data, context=None):
         """
         異常に関するドメイン知識を提供
-        
+
         Args:
             anomaly_data (pd.DataFrame): 異常を含むデータ
             context (dict, optional): 追加コンテキスト
-            
+
         Returns:
             dict: 知識ベースの結果
         """
         findings = {}
-        
-        for idx, anomaly in anomaly_data.iterrows():
-            date = anomaly['Date']
-            value = anomaly['Close']
-            pct_change = anomaly['pct_change']
-            
+
+        for _, anomaly in anomaly_data.iterrows():
+            date = anomaly["Date"]
+            value = anomaly["Close"]
+            pct_change = anomaly["pct_change"]
+
             # 検索用の日付フォーマット
             anomaly_date = date.strftime("%Y-%m-%d")
-            
+
             # 金融知識に関するLLMクエリ
             llm_prompt = f"""
             金融市場の専門家として、S&P 500指数のこの異常を分析してください:
@@ -50,14 +51,9 @@ class KnowledgeBaseAgent(BaseAgent):
             
             金融市場の知識に基づいて分析してください。
             """
-            
+
             llm_analysis = self.query_llm(llm_prompt)
-            
-            findings[anomaly_date] = {
-                "llm_analysis": llm_analysis
-            }
-            
-        return {
-            "agent": self.name,
-            "findings": findings
-        }
+
+            findings[anomaly_date] = {"llm_analysis": llm_analysis}
+
+        return {"agent": self.name, "findings": findings}

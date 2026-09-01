@@ -1,103 +1,98 @@
-import numpy as np
+"""統計手法と拡張モデルを統一的に扱う異常検知器。"""
+
 import pandas as pd
 from scipy import stats
-import importlib
+
+SUPPORTED_METHODS = {
+    "z_score",
+    "iqr",
+    "moving_avg",
+    "isolation_forest",
+    "deep_svdd",
+}
+
 
 class AnomalyDetector:
-    """金融時系列データ用の異常検知器"""
-    
-    def __init__(self, method='z_score', threshold=3.0, **kwargs):
-        """
-        異常検知器を初期化
-        
-        Args:
-            method (str): 検出方法 ('z_score', 'iqr', 'moving_avg', 'isolation_forest', 'deep_svdd')
-            threshold (float): 異常検知の閾値
-            **kwargs: 各検出方法に対する追加パラメータ
-        """
+    """金融時系列データに複数の異常検知手法を適用する。"""
+
+    def __init__(
+        self,
+        method: str = "z_score",
+        threshold: float = 3.0,
+        **kwargs,
+    ) -> None:
+        if method not in SUPPORTED_METHODS:
+            supported = ", ".join(sorted(SUPPORTED_METHODS))
+            raise ValueError(f"未対応の検出方法です: {method}（対応: {supported}）")
+
         self.method = method
         self.threshold = threshold
         self.kwargs = kwargs
-        
-        # 追加の検出器が必要な場合にインスタンス化
-        self.detector = None
-        if method == 'isolation_forest':
-            try:
-                from .isolation_forest import IsolationForestDetector
-                self.detector = IsolationForestDetector(
-                    contamination=kwargs.get('contamination', 0.05),
-                    n_estimators=kwargs.get('n_estimators', 100),
-                    random_state=kwargs.get('random_state', 42)
-                )
-            except ImportError:
-                raise ImportError("Isolation Forest 検出器をインポートできません。scikit-learnがインストールされていることを確認してください。")
-        elif method == 'deep_svdd':
-            try:
-                from .deep_svdd import DeepSVDDDetector
-                self.detector = DeepSVDDDetector(
-                    threshold=kwargs.get('threshold', 0.9),
-                    epochs=kwargs.get('epochs', 50),
-                    batch_size=kwargs.get('batch_size', 32),
-                    random_state=kwargs.get('random_state', 42)
-                )
-            except ImportError:
-                raise ImportError("Deep SVDD 検出器をインポートできません。TensorFlowがインストールされていることを確認してください。")
-        
-    def detect(self, data, date_column='Date', value_column='Close', extra_features=None):
-        """
-        時系列データ内の異常を検出
-        
-        Args:
-            data (pd.DataFrame): 入力時系列データ
-            date_column (str): 日付カラム名
-            value_column (str): 値カラム名
-            extra_features (list): 追加の特徴量カラム名のリスト
-            
-        Returns:
-            pd.DataFrame: 異常フラグ付きのデータ
-        """
-        # 専用検出器を持つメソッドの場合
+        self.detector = self._create_specialized_detector()
+
+    def _create_specialized_detector(self):
+        if self.method == "isolation_forest":
+            from .isolation_forest import IsolationForestDetector
+
+            return IsolationForestDetector(
+                contamination=self.kwargs.get("contamination", 0.05),
+                n_estimators=self.kwargs.get("n_estimators", 100),
+                random_state=self.kwargs.get("random_state", 42),
+            )
+        if self.method == "deep_svdd":
+            from .deep_svdd import DeepSVDDDetector
+
+            return DeepSVDDDetector(
+                threshold=self.kwargs.get("threshold", 0.9),
+                epochs=self.kwargs.get("epochs", 20),
+                batch_size=self.kwargs.get("batch_size", 32),
+                random_state=self.kwargs.get("random_state", 42),
+            )
+        return None
+
+    def detect(
+        self,
+        data: pd.DataFrame,
+        date_column: str = "Date",
+        value_column: str = "Close",
+        extra_features: list[str] | None = None,
+    ) -> pd.DataFrame:
+        """入力データから異常と判定された行だけを返す。"""
         if self.detector is not None:
-            return self.detector.detect(data, date_column, value_column, extra_features)
-        
-        # 組み込みメソッドの場合
-        df = data.copy()
-        
-        if self.method == 'z_score':
-            # Z-scoreメソッド
-            z_scores = stats.zscore(df[value_column])
-            df['z_score'] = z_scores
-            df['is_anomaly'] = abs(z_scores) > self.threshold
-            
-        elif self.method == 'iqr':
-            # IQRメソッド
-            Q1 = df[value_column].quantile(0.25)
-            Q3 = df[value_column].quantile(0.75)
-            IQR = Q3 - Q1
-            lower_bound = Q1 - self.threshold * IQR
-            upper_bound = Q3 + self.threshold * IQR
-            df['is_anomaly'] = (df[value_column] < lower_bound) | (df[value_column] > upper_bound)
-            
-        elif self.method == 'moving_avg':
-            # 移動平均メソッド
-            window = self.kwargs.get('window', 20)  # 20日ウィンドウをデフォルトとする
-            df['moving_avg'] = df[value_column].rolling(window=window).mean()
-            df['moving_std'] = df[value_column].rolling(window=window).std()
-            
-            # 最初の'window'日をスキップ
-            df['is_anomaly'] = False
-            df.loc[window:, 'is_anomaly'] = abs(df[value_column] - df['moving_avg']) > self.threshold * df['moving_std']
-        
-        # 日次変化率を計算
-        df['pct_change'] = df[value_column].pct_change() * 100
-        
-        # 重要な変化率を持つ異常を見つける
-        df['is_significant_change'] = abs(df['pct_change']) > self.threshold * df['pct_change'].std()
-        
-        # 最終的な異常は、メソッド固有の異常または重要な変化率のいずれか
-        df['is_anomaly'] = df['is_anomaly'] | df['is_significant_change']
-        
-        # 異常のみを取得
-        anomalies = df[df['is_anomaly']].copy()
-        
-        return anomalies
+            return self.detector.detect(
+                data,
+                date_column,
+                value_column,
+                extra_features,
+            )
+        if value_column not in data:
+            raise ValueError(f"必須カラムがありません: {value_column}")
+
+        frame = data.copy()
+        values = frame[value_column]
+
+        if self.method == "z_score":
+            frame["z_score"] = stats.zscore(values)
+            frame["is_anomaly"] = frame["z_score"].abs() > self.threshold
+        elif self.method == "iqr":
+            first_quartile = values.quantile(0.25)
+            third_quartile = values.quantile(0.75)
+            interquartile_range = third_quartile - first_quartile
+            lower_bound = first_quartile - self.threshold * interquartile_range
+            upper_bound = third_quartile + self.threshold * interquartile_range
+            frame["is_anomaly"] = values.lt(lower_bound) | values.gt(upper_bound)
+        else:
+            window = self.kwargs.get("window", 20)
+            frame["moving_avg"] = values.rolling(window=window).mean()
+            frame["moving_std"] = values.rolling(window=window).std()
+            frame["is_anomaly"] = (
+                (values - frame["moving_avg"]).abs() > self.threshold * frame["moving_std"]
+            ).fillna(False)
+
+        frame["pct_change"] = values.pct_change() * 100
+        change_threshold = self.threshold * frame["pct_change"].std()
+        frame["is_significant_change"] = (frame["pct_change"].abs() > change_threshold).fillna(
+            False
+        )
+        frame["is_anomaly"] |= frame["is_significant_change"]
+        return frame.loc[frame["is_anomaly"]].copy()

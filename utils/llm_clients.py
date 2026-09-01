@@ -1,72 +1,80 @@
+import logging
 import os
-from dotenv import load_dotenv
+
 import requests
-import json
-from typing import Dict, List, Optional, Union
+from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # .envファイルから環境変数をロード
 load_dotenv()
 
+
 class OpenAIClient:
     """OpenAI API用クライアント"""
-    
+
     def __init__(self, api_key=None, model=None):
         """
         OpenAIクライアントを初期化
-        
+
         Args:
             api_key (str, optional): OpenAI APIキー
             model (str, optional): 使用するモデル
         """
-        self.api_key = os.getenv("OPENAI_API_KEY")
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         if not self.api_key:
             raise ValueError("OpenAI APIキーが必要です")
-        
+
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
         self.api_url = "https://api.openai.com/v1/chat/completions"
-        
+
     def generate(self, prompt, max_tokens=1000, temperature=0.5):
         """
         OpenAI APIでテキストを生成
-        
+
         Args:
             prompt (str): 入力プロンプト
             max_tokens (int, optional): 生成する最大トークン数
             temperature (float, optional): サンプリング温度
-            
+
         Returns:
             str: 生成されたテキスト
         """
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}"
+            "Authorization": f"Bearer {self.api_key}",
         }
-        
+
         data = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens,
-            "temperature": temperature
+            "temperature": temperature,
         }
-        
-        response = requests.post(self.api_url, headers=headers, data=json.dumps(data))
-        
+
+        response = requests.post(
+            self.api_url,
+            headers=headers,
+            json=data,
+            timeout=30,
+        )
+
         if response.status_code == 200:
             result = response.json()
             return result["choices"][0]["message"]["content"]
         else:
             error_msg = f"エラー {response.status_code}: {response.text}"
-            print(error_msg)
+            logger.error(error_msg)
             return f"APIエラー: {error_msg}"
 
 
 class HuggingFaceClient:
     """Hugging Face推論API用クライアント"""
-    
+
     def __init__(self, api_key=None, model=None):
         """
         Hugging Faceクライアントを初期化
-        
+
         Args:
             api_key (str, optional): Hugging Face APIキー
             model (str, optional): 使用するモデル
@@ -74,37 +82,40 @@ class HuggingFaceClient:
         self.api_key = api_key or os.getenv("HF_API_KEY")
         if not self.api_key:
             raise ValueError("Hugging Face APIキーが必要です")
-        
+
         self.model = model or os.getenv("HF_MODEL", "mistral/mistral-7b-instruct-v0.2")
         self.api_url = f"https://api-inference.huggingface.co/models/{self.model}"
-        
+
     def generate(self, prompt, max_tokens=1000, temperature=0.5):
         """
         Hugging Face APIでテキストを生成
-        
+
         Args:
             prompt (str): 入力プロンプト
             max_tokens (int, optional): 生成する最大トークン数
             temperature (float, optional): サンプリング温度
-            
+
         Returns:
             str: 生成されたテキスト
         """
-        headers = {
-            "Authorization": f"Bearer {self.api_key}"
-        }
-        
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+
         data = {
             "inputs": prompt,
             "parameters": {
                 "max_new_tokens": max_tokens,
                 "temperature": temperature,
                 "do_sample": temperature > 0,
-            }
+            },
         }
-        
-        response = requests.post(self.api_url, headers=headers, json=data)
-        
+
+        response = requests.post(
+            self.api_url,
+            headers=headers,
+            json=data,
+            timeout=30,
+        )
+
         if response.status_code == 200:
             result = response.json()
             if isinstance(result, list) and len(result) > 0:
@@ -113,26 +124,22 @@ class HuggingFaceClient:
                 return str(result)
         else:
             error_msg = f"エラー {response.status_code}: {response.text}"
-            print(error_msg)
+            logger.error(error_msg)
             return f"APIエラー: {error_msg}"
 
 
 class MockLLMClient:
     """APIコールなしでテスト用のモックLLMクライアント"""
-    
-    def __init__(self):
-        """モックLLMクライアントを初期化"""
-        pass
-        
+
     def generate(self, prompt, max_tokens=1000, temperature=0.5):
         """
         モックレスポンスでテキストを生成
-        
+
         Args:
             prompt (str): 入力プロンプト
             max_tokens (int, optional): 生成する最大トークン数
             temperature (float, optional): サンプリング温度
-            
+
         Returns:
             str: 生成されたテキスト
         """

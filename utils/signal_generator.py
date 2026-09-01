@@ -1,119 +1,103 @@
-import pandas as pd
+"""異常検知結果から売買シグナルと予測補正を生成する。"""
+
+import logging
+
 import numpy as np
+import pandas as pd
+
+logger = logging.getLogger(__name__)
+
 
 class SignalGenerator:
-    """異常検知結果から売買シグナルを生成するクラス"""
-    
-    def __init__(self, threshold=0.5, window_size=5):
-        """
-        シグナル生成器を初期化
-        
-        Args:
-            threshold (float): シグナル生成の閾値
-            window_size (int): 価格トレンド判定の窓サイズ
-        """
+    """価格トレンドと異常強度から売買シグナルを生成する。"""
+
+    def __init__(self, threshold: float = 0.5, window_size: int = 5) -> None:
         self.threshold = threshold
         self.window_size = window_size
-        
-    def generate_signals(self, df, anomalies):
-        """
-        異常検知結果から売買シグナルを生成
-        
-        Args:
-            df (pd.DataFrame): 元の時系列データ
-            anomalies (pd.DataFrame): 検出された異常
-            
-        Returns:
-            pd.DataFrame: 売買シグナル付きのデータフレーム
-        """
-        # 元のデータをコピー
-        signals_df = df.copy()
-        
-        # 初期シグナルを0（ホールド）に設定
-        signals_df['signal'] = 0
-        
-        # 異常強度カラムを追加
-        signals_df['anomaly_score'] = 0.0
-        
-        # pct_changeが含まれていない場合は計算して追加
-        if 'pct_change' not in signals_df.columns:
-            signals_df['pct_change'] = signals_df['Close'].pct_change() * 100
-        
-        if not anomalies.empty:
-            # 異常データの方向性を判定
-            for idx, anomaly in anomalies.iterrows():
-                date = anomaly['Date']
-                
-                # データフレーム内のこの日付のインデックスを取得
-                try:
-                    df_idx = signals_df[signals_df['Date'] == date].index[0]
-                    
-                    # 方向性の判定（過去数日間の傾向に基づく）
-                    if df_idx >= self.window_size:
-                        # 過去window_size日間の平均変化率
-                        past_trend = signals_df.loc[df_idx-self.window_size:df_idx-1, 'Close'].pct_change().mean()
-                        
-                        # 当日の変化率
-                        current_change = anomaly['pct_change'] / 100  # パーセントから小数に変換
-                        
-                        # 異常スコアの計算（Z-scoreの絶対値または指定された異常スコア）
-                        if 'z_score' in anomaly:
-                            anomaly_score = abs(anomaly['z_score'])
-                        else:
-                            # 異常の強さを変化率の大きさで代用
-                            anomaly_score = abs(current_change) / 0.01  # 1%の変化を基準に正規化
-                        
-                        # 方向性判断
-                        if current_change > 0 and (current_change > past_trend * 1.5):
-                            # 上昇異常（買いシグナル）
-                            signals_df.loc[df_idx, 'signal'] = 1
-                        elif current_change < 0 and (current_change < past_trend * 1.5):
-                            # 下降異常（売りシグナル）
-                            signals_df.loc[df_idx, 'signal'] = -1
-                        
-                        # 異常スコアを保存 - float32との互換性問題を回避するために明示的に型変換
-                        signals_df.loc[df_idx, 'anomaly_score'] = float(anomaly_score)
-                        
-                except IndexError:
+
+    def generate_signals(self, data: pd.DataFrame, anomalies: pd.DataFrame) -> pd.DataFrame:
+        """異常行を買い・売り・ホールドのシグナルへ変換する。"""
+        signals = data.copy()
+        if "Close" not in signals:
+            raise ValueError("必須カラムがありません: Close")
+
+        signals["Close"] = signals["Close"].astype(np.float64)
+        signals["signal"] = 0
+        signals["anomaly_score"] = np.float64(0.0)
+        if "pct_change" not in signals:
+            signals["pct_change"] = signals["Close"].pct_change() * 100
+        signals["pct_change"] = signals["pct_change"].astype(np.float64)
+
+        for _, anomaly in anomalies.iterrows():
+            date = anomaly["Date"]
+            try:
+                matching_indexes = signals.index[signals["Date"] == date]
+                if matching_indexes.empty:
                     continue
-        
-        return signals_df
-    
-    def forecast_adjustment(self, signals_df, forecast_df, weight=0.5):
-        """
-        シグナルに基づいて予測価格を補正
-        
-        Args:
-            signals_df (pd.DataFrame): シグナル付きデータフレーム
-            forecast_df (pd.DataFrame): 予測データフレーム
-            weight (float): 異常に基づく補正の重み
-            
-        Returns:
-            pd.DataFrame: 補正された予測
-        """
-        adjusted_forecast = forecast_df.copy()
-        
-        # シグナルのある日付のみを抽出
-        signal_dates = signals_df[signals_df['signal'] != 0]
-        
-        if not signal_dates.empty:
-            for idx, row in signal_dates.iterrows():
-                date = row['Date']
-                signal = row['signal']
-                score = row['anomaly_score']
-                
-                # この日付以降の予測を見つける
-                future_idx = adjusted_forecast[adjusted_forecast['Date'] >= date].index
-                
-                if len(future_idx) > 0:
-                    # 補正係数の計算（シグナルの方向と強度に基づく）
-                    # 徐々に減衰する影響を計算
-                    for i, future_i in enumerate(future_idx):
-                        decay = np.exp(-0.1 * i)  # 指数関数的減衰
-                        adjustment = signal * score * weight * decay
-                        
-                        # 予測価格の補正（現在の予測値に対する割合で）
-                        current_pred = adjusted_forecast.loc[future_i, 'predicted_price']
-                        adjusted_forecast.loc[future_i, 'predicted_price'] = current_pred * (1 + adjustment/100)
-        
-        return adjusted_forecast
+
+                data_index = matching_indexes[0]
+                if data_index < self.window_size:
+                    continue
+
+                history = signals.loc[data_index - self.window_size : data_index - 1, "Close"]
+                past_trend = history.pct_change().mean() if len(history) > 1 else 0.0
+                current_change = self._current_change(signals, anomaly, data_index)
+                anomaly_score = self._anomaly_score(anomaly, current_change)
+
+                trend_threshold = 1.5
+                if current_change > past_trend * trend_threshold and current_change > 0:
+                    signals.loc[data_index, "signal"] = 1
+                elif current_change < past_trend * trend_threshold and current_change < 0:
+                    signals.loc[data_index, "signal"] = -1
+                signals.loc[data_index, "anomaly_score"] = np.float64(anomaly_score)
+            except (IndexError, KeyError, TypeError, ValueError):
+                logger.exception("シグナル生成に失敗しました（日付: %s）", date)
+
+        return signals
+
+    @staticmethod
+    def _current_change(signals: pd.DataFrame, anomaly: pd.Series, data_index: int) -> float:
+        if "pct_change" in anomaly:
+            return float(anomaly["pct_change"]) / 100
+        if data_index == 0:
+            return 0.0
+
+        previous_price = float(signals.loc[data_index - 1, "Close"])
+        current_price = float(anomaly["Close"])
+        return (current_price - previous_price) / previous_price
+
+    @staticmethod
+    def _anomaly_score(anomaly: pd.Series, current_change: float) -> float:
+        if "z_score" in anomaly:
+            return abs(float(anomaly["z_score"]))
+        if "anomaly_score" in anomaly:
+            return abs(float(anomaly["anomaly_score"]))
+        return abs(current_change) / 0.01
+
+    def forecast_adjustment(
+        self,
+        signals: pd.DataFrame,
+        forecast: pd.DataFrame | None,
+        weight: float = 0.5,
+    ) -> pd.DataFrame:
+        """シグナルの方向と強度に応じて将来予測を補正する。"""
+        if forecast is None or forecast.empty:
+            return pd.DataFrame()
+
+        adjusted = forecast.copy()
+        adjusted["predicted_price"] = adjusted["predicted_price"].astype(np.float64)
+
+        for _, row in signals.loc[signals["signal"] != 0].iterrows():
+            try:
+                future_indexes = adjusted.index[adjusted["Date"] >= row["Date"]]
+                for offset, future_index in enumerate(future_indexes):
+                    decay = np.exp(-0.1 * offset)
+                    adjustment = int(row["signal"]) * float(row["anomaly_score"]) * weight * decay
+                    current_prediction = float(adjusted.loc[future_index, "predicted_price"])
+                    adjusted.loc[future_index, "predicted_price"] = np.float64(
+                        current_prediction * (1 + adjustment / 100)
+                    )
+            except (KeyError, TypeError, ValueError):
+                logger.exception("予測補正に失敗しました")
+
+        return adjusted
