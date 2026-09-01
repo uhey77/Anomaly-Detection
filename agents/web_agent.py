@@ -1,14 +1,13 @@
-import requests
-from bs4 import BeautifulSoup
 from .base_agent import BaseAgent
+
 
 class WebInformationAgent(BaseAgent):
     """異常に関連する情報をWebから検索するエージェント"""
-    
+
     def __init__(self, name="Web情報エージェント", llm_client=None, api_key=None):
         """
         Web情報エージェントを初期化
-        
+
         Args:
             name (str): エージェント名
             llm_client: LLMクライアントインスタンス
@@ -16,34 +15,34 @@ class WebInformationAgent(BaseAgent):
         """
         super().__init__(name, llm_client)
         self.api_key = api_key
-        
+
     def process(self, anomaly_data, context=None):
         """
         異常に関する情報をWebから検索
-        
+
         Args:
             anomaly_data (pd.DataFrame): 異常を含むデータ
             context (dict, optional): 追加コンテキスト
-            
+
         Returns:
             dict: Web情報の結果
         """
         findings = {}
-        
-        for idx, anomaly in anomaly_data.iterrows():
-            date = anomaly['Date']
-            value = anomaly['Close']
-            pct_change = anomaly['pct_change']
-            
+
+        for _, anomaly in anomaly_data.iterrows():
+            date = anomaly["Date"]
+            value = anomaly["Close"]
+            pct_change = anomaly["pct_change"]
+
             # 検索用の日付フォーマット
             search_date = date.strftime("%Y-%m-%d")
-            
+
             # 検索クエリの作成
             search_query = f"株式市場 S&P 500 重要イベント {search_date} {pct_change:.2f}% 変動"
-            
+
             # Web検索（簡易版 - 実際の実装ではプロパーAPIを使用）
             web_results = self._mock_web_search(search_query)
-            
+
             # Web結果を分析するためのLLMクエリ
             llm_prompt = f"""
             株式市場の異常に関する次のWeb検索結果を分析してください:
@@ -58,26 +57,23 @@ class WebInformationAgent(BaseAgent):
             この情報に基づいて、この市場異常の原因は何だと考えられますか？
             潜在的な原因と関連するコンテキストを含む簡潔な分析を提供してください。
             """
-            
+
             llm_analysis = self.query_llm(llm_prompt)
-            
+
             findings[search_date] = {
                 "raw_search_results": web_results,
-                "llm_analysis": llm_analysis
+                "llm_analysis": llm_analysis,
             }
-            
-        return {
-            "agent": self.name,
-            "findings": findings
-        }
-    
+
+        return {"agent": self.name, "findings": findings}
+
     def _mock_web_search(self, query):
         """
         モックWeb検索関数（実際のAPI呼び出しに置き換える）
-        
+
         Args:
             query (str): 検索クエリ
-            
+
         Returns:
             str: モック検索結果
         """

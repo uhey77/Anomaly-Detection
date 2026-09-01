@@ -1,29 +1,99 @@
 # マルチエージェントLLM異常検知フレームワーク
 
-このプロジェクトは、大規模言語モデル（LLM）を活用したマルチエージェントアプローチによる時系列データの異常検知フレームワークです。Park (2024)の研究を基に、複数のAIエージェントが協調して金融市場データの異常を検出・分析します。
+金融時系列データの異常を検出し、複数のLLMエージェントで原因分析・評価・将来予測を行うPythonアプリケーションです。
 
-## 特徴
+## 主な機能
 
-- 複数の専門AIエージェントによる協調分析
-- 時系列データの異常検知と分析
-- LLMを活用した異常の解釈と説明
-- インタラクティブなWebインターフェース
-- 柔軟な異常検知アルゴリズム
+- Z-Score、IQR、移動平均、Isolation Forest、Deep SVDDによる異常検知
+- Web情報・知識・クロスチェック・レポート・管理者エージェントによる協調分析
+- 売買シグナル生成とLSTMベースの価格予測
+- 既知の異常日を使った精度評価と手法比較
+- GradioによるWeb UIとCLIの2つの実行方法
 
-## エージェント構成
+## 必要環境
 
-このフレームワークは、以下の5つの特化型エージェントで構成されています：
+- Python 3.12
+- uv（推奨）またはpip
 
-1. **Web情報エージェント**: 異常に関連するWeb情報を検索・分析
-2. **知識ベースエージェント**: 金融市場に関するドメイン知識を提供
-3. **クロスチェックエージェント**: 異常を他のデータソースと照合
-4. **レポート統合エージェント**: 各エージェントの分析を統合
-5. **管理者エージェント**: 最終評価と行動推奨を提供
+## セットアップ
 
-# プロジェクト構造
-詳細なプロジェクト構造については [STRUCTURE.md](https://github.com/uhey77/Anomaly-Detection/blob/main/STRUCTURE.md) を参照してください。
+ロック済みの本番依存をインストールします。
 
-# 参考文献
-- [Park, T. (2024). マルチエージェントによるLLM異常検知フレームワーク. BIS.](https://arxiv.org/html/2403.19735v1#:~:text=This%20paper%20introduces%20a%20Large,I%20analyse%20the%20S%26P%20500)
-- [Alnegheimish et al. (2024). Large language models can be zero-shot anomaly detectors for time series?. MIT.](https://ar5iv.labs.arxiv.org/html/2405.14755#:~:text=detection%20task,better%20than%20large%20language%20models)
-- [Zhou, Z., Yu, R. et al. (2025). Can LLMs Understand Time Series Anomalies?. UCSD.](https://openreview.net/forum?id=LGafQ1g2D2)
+~~~bash
+uv venv --python 3.12
+uv pip install -r requirements.lock
+~~~
+
+開発・検証を行う場合は、代わりに `requirements-dev.lock` を使用します。
+
+APIを利用する場合は、実行環境に次の環境変数を設定してください。
+
+~~~bash
+export OPENAI_API_KEY="..."
+export HF_API_KEY="..."
+~~~
+
+APIキーを設定しない場合でも、Mockプロバイダーで主要な画面と分析フローを確認できます。
+
+## 実行
+
+Web UI:
+
+~~~bash
+uv run python app_improved.py
+~~~
+
+CLI:
+
+~~~bash
+uv run python main.py
+~~~
+
+Web UIは既定で `http://localhost:7861` に起動します。
+
+## データ形式
+
+アップロードするCSVまたはXLSXには、日付と価格を表す列が必要です。推奨する列名は次のとおりです。
+
+- `Date`: 日付
+- `Close`: 終値
+- `Volume`: 出来高（任意）
+- `VIX`: VIX指数（任意）
+- `USDJPY`: ドル円（任意）
+
+`Date`または`Close`がない場合は、先頭2列を日付と価格として扱います。
+
+## プロジェクト構成
+
+~~~text
+.
+├── agents/                    # LLMエージェント
+├── data/                      # サンプルデータ
+├── detection/                 # 異常検知器と生成ファクトリー
+├── models/                    # 時系列予測モデル
+├── services/                  # データ読み込みなどのアプリケーションサービス
+├── ui/                        # Gradio UIのスタイル
+├── utils/                     # LLMクライアントとシグナル生成
+├── app_improved.py            # 正式なWeb UI
+├── main.py                    # CLI
+├── config.py                  # 検出・予測・エージェント設定
+├── evaluation.py              # 精度評価
+└── realtime_data_provider.py  # Yahoo Financeデータ取得
+~~~
+
+異常検知器は `detection.create_detector()`、売買シグナルは
+`utils.signal_generator.SignalGenerator` を唯一の実装元として利用します。
+
+## 検証
+
+~~~bash
+ruff check .
+ruff format --check .
+python -m unittest discover -v
+~~~
+
+## 参考文献
+
+- [Park (2024), マルチエージェントによるLLM異常検知フレームワーク](https://arxiv.org/html/2403.19735v1)
+- [Alnegheimish et al. (2024), Large language models can be zero-shot anomaly detectors for time series?](https://ar5iv.labs.arxiv.org/html/2405.14755)
+- [Zhou et al. (2025), Can LLMs Understand Time Series Anomalies?](https://openreview.net/forum?id=LGafQ1g2D2)
