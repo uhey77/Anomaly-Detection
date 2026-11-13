@@ -10,7 +10,7 @@ dependencies = [
     "streamlit==1.67.0",
     "orjson>=3.13,<4",
     "pillow==13.0.0",
-    "pyarrow>=26.0,<27"
+    "pyarrow>=26.0,<27",
 
     # ── 科学計算 / ML ────────────────────────
     "numpy>=2.1,<2.2",  # TensorFlow 2.21とのABI互換範囲
