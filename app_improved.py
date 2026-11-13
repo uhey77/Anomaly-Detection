@@ -988,16 +988,16 @@ def create_streamlit_ui():
 
     tabs = st.tabs(["時系列分析", "将来予測", "検出された異常", "投資シグナル", "AI分析結果", "性能評価"])
     with tabs[0]:
-        st.plotly_chart(plot, use_container_width=True)
+        st.plotly_chart(plot, width="stretch")
     with tabs[1]:
         if forecast_plot is not None:
-            st.plotly_chart(forecast_plot, use_container_width=True)
+            st.plotly_chart(forecast_plot, width="stretch")
         else:
             st.info("予測は未生成です。異常が検出され、予測が有効な場合に表示されます。")
     with tabs[2]:
-        st.dataframe(anomaly_table, use_container_width=True, hide_index=True)
+        st.dataframe(anomaly_table, width="stretch", hide_index=True)
     with tabs[3]:
-        st.dataframe(signals_table, use_container_width=True, hide_index=True)
+        st.dataframe(signals_table, width="stretch", hide_index=True)
     with tabs[4]:
         st.subheader("マルチエージェント総合分析")
         if not findings:
@@ -1038,9 +1038,9 @@ def create_streamlit_ui():
         if "evaluation_result" in st.session_state:
             metrics, matrix = st.session_state["evaluation_result"]
             st.markdown("**基本評価指標**")
-            st.dataframe(metrics, use_container_width=True, hide_index=True)
+            st.dataframe(metrics, width="stretch", hide_index=True)
             st.markdown("**混同行列**")
-            st.dataframe(matrix, use_container_width=True, hide_index=True)
+            st.dataframe(matrix, width="stretch", hide_index=True)
 
         st.markdown("**複数手法・閾値の比較**")
         st.multiselect(
@@ -1051,7 +1051,7 @@ def create_streamlit_ui():
         )
         st.text_input("比較する閾値（カンマ区切り）", "2.0, 2.5, 3.0, 3.5", key="comparison_thresholds")
         if "comparison_result" in st.session_state:
-            st.dataframe(st.session_state["comparison_result"], use_container_width=True, hide_index=True)
+            st.dataframe(st.session_state["comparison_result"], width="stretch", hide_index=True)
 
 
 if __name__ == "__main__":
