@@ -29,8 +29,9 @@ jobs:
           uv pip compile pyproject.toml --extra dev --python-version 3.12 --python-platform aarch64-apple-darwin --output-file requirements-dev.lock
       - name: Install and verify dependencies
         run: |
+          uv pip compile pyproject.toml --extra dev --python-version 3.12 --python-platform x86_64-unknown-linux-gnu --output-file /tmp/requirements-ci.lock
           uv venv --python 3.12
-          uv pip sync requirements-dev.lock
+          uv pip sync /tmp/requirements-ci.lock
           uv pip check
       - name: Verify Python code and unit tests
         run: |
