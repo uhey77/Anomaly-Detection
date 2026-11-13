@@ -1,11 +1,8 @@
-import gc
 import tempfile
 import unittest
-import warnings
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-import gradio as gr
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -123,14 +120,24 @@ class CoreBehaviorTest(unittest.TestCase):
         )
         self.assertIsInstance(result[0], go.Figure)
 
-    def test_ui_can_be_constructed(self):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", ResourceWarning)
-            interface = app_improved.create_gradio_ui()
-            self.assertIsInstance(interface, gr.Blocks)
-            interface.close()
-            del interface
-            gc.collect()
+    def test_streamlit_ui_can_be_rendered(self):
+        from streamlit.testing.v1 import AppTest
+
+        app = AppTest.from_file("app_improved.py").run(timeout=90)
+        self.assertFalse(app.exception)
+        self.assertEqual(len(app.tabs), 6)
+
+    def test_analysis_defaults_to_noop_progress(self):
+        with (
+            patch("app_improved.prepare_data", return_value=self.data),
+            patch("app_improved.detect_anomalies", return_value=pd.DataFrame()),
+        ):
+            result = app_improved.run_analysis(
+                "sample", None, "z_score", 2.0, "mock",
+                False, False, False, False, False,
+                include_extra_indicators=False, generate_signals=False,
+            )
+        self.assertIsInstance(result[0], go.Figure)
 
     def test_llm_clients_honor_explicit_api_keys(self):
         openai = OpenAIClient(api_key="openai-test", model="test-model")

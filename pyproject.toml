@@ -7,10 +7,9 @@ requires-python = ">=3.12,<3.13"
 
 dependencies = [
     # ── UI / API ──────────────────────────────
-    "gradio==6.26.0",
-    "gradio-client==2.6.1",
+    "streamlit==1.67.0",
     "orjson>=3.9,<4",
-    "pillow==12.3.0",
+    "pillow==13.0.0",
 
     # ── 科学計算 / ML ────────────────────────
     "numpy>=1.26,<1.27",
@@ -50,7 +49,7 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "UP", "B"]
-ignore = ["B008"]  # Gradioは関数引数の gr.Progress() で進捗を注入する
+ignore = ["B008"]
 
 [tool.rye]
 installer = "pip"

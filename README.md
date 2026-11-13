@@ -8,7 +8,7 @@
 - Web情報・知識・クロスチェック・レポート・管理者エージェントによる協調分析
 - 売買シグナル生成とLSTMベースの価格予測
 - 既知の異常日を使った精度評価と手法比較
-- GradioによるWeb UIとCLIの2つの実行方法
+- StreamlitによるWeb UIとCLIの2つの実行方法
 
 ## 必要環境
 
@@ -17,7 +17,7 @@
 
 ## セットアップ
 
-ロック済みの本番依存をインストールします。
+ロック済みの本番依存をインストールします（Pillow 13対応）。
 
 ~~~bash
 uv venv --python 3.12
@@ -40,7 +40,7 @@ APIキーを設定しない場合でも、Mockプロバイダーで主要な画�
 Web UI:
 
 ~~~bash
-uv run python app_improved.py
+uv run streamlit run app_improved.py
 ~~~
 
 CLI:
@@ -49,7 +49,7 @@ CLI:
 uv run python main.py
 ~~~
 
-Web UIは既定で `http://localhost:7861` に起動します。
+Web UIは既定で `http://localhost:8501` に起動します。
 
 ## データ形式
 
