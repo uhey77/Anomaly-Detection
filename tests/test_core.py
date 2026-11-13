@@ -123,7 +123,7 @@ class CoreBehaviorTest(unittest.TestCase):
     def test_streamlit_ui_can_be_rendered(self):
         from streamlit.testing.v1 import AppTest
 
-        app = AppTest.from_file("app_improved.py").run(timeout=90)
+        app = AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app_improved.py")).run(timeout=90)
         self.assertFalse(app.exception)
         self.assertEqual(len(app.tabs), 6)
 
