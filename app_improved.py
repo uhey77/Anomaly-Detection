@@ -1,6 +1,5 @@
 import logging
 
-import gradio as gr
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -26,7 +25,6 @@ from detection import create_detector
 from evaluation import AnomalyEvaluator
 from models.forecasting_pipeline import ForecastingPipeline
 from services.data_service import prepare_data
-from ui.styles import CUSTOM_CSS
 from utils.llm_clients import HuggingFaceClient, MockLLMClient, OpenAIClient
 from utils.signal_generator import SignalGenerator
 
@@ -376,9 +374,12 @@ def run_analysis(
     include_extra_indicators=True,
     generate_signals=True,
     forecast_days=30,
-    progress=gr.Progress(),
+    progress=None,
 ):
     try:
+        if progress is None:
+            def progress(fraction, desc=""):
+                return None
         # プログレス初期化
         progress(0.0, desc="分析を開始しています...")
 
@@ -867,392 +868,192 @@ def compare_methods(df, methods, thresholds_text, known_anomalies_str):
         return error_df
 
 
-# Gradio UIの作成
-def create_gradio_ui():
-    with gr.Blocks(title="🔍 マルチエージェントLLM異常検知分析システム") as app:
-        # ヘッダー
-        gr.HTML("""
-        <div class="header fade-in">
-            <h1>🔍 マルチエージェントLLM異常検知分析システム</h1>
-            <p>🤖 AI駆動の時系列データ異常検知と包括的分析プラットフォーム</p>
-        </div>
-        """)
 
-        # データおよび結果を保持する状態
-        stored_df = gr.State(None)
-        stored_anomalies = gr.State(None)
+# Streamlit UI: analysis functions above are deliberately framework-independent.
+def create_streamlit_ui():
+    """Run the six-tab financial anomaly dashboard in Streamlit."""
+    import tempfile
+    from pathlib import Path
 
-        # 設定セクション
-        with gr.Group():
-            gr.HTML('<div class="config-card fade-in">')
-            gr.HTML("<h3>⚙️ 分析設定</h3>")
+    import streamlit as st
 
-            with gr.Row():
-                with gr.Column(scale=1):
-                    gr.HTML("<h4>📊 データ設定</h4>")
-                    data_source = gr.Radio(
-                        label="📁 データソース",
-                        choices=[
-                            ("サンプルデータを使用", "sample"),
-                            ("ファイルをアップロード", "upload"),
-                        ],
-                        value="sample",
-                        info="🎯 サンプルデータには歴史的な市場異常が含まれています",
-                    )
-                    file_path = gr.File(
-                        label="📋 時系列データファイル (CSV/XLSX)",
-                        type="filepath",
-                        file_types=[".csv", ".xlsx"],
-                        visible=False,
-                    )
-                    include_extra_indicators = gr.Checkbox(
-                        label="📈 追加指標を含める（出来高、VIX、ドル円）",
-                        value=True,
-                        info="✨ より詳細な市場分析のための追加データ",
-                    )
+    st.set_page_config(page_title="マルチエージェントLLM異常検知", page_icon="📈", layout="wide")
+    st.title("マルチエージェントLLM異常検知分析システム")
+    st.caption("時系列異常検知・金融市場分析・将来予測")
 
-                with gr.Column(scale=1):
-                    gr.HTML("<h4>🎯 異常検知設定</h4>")
-                    detection_method = gr.Dropdown(
-                        label="🔍 検出方法",
-                        choices=[
-                            ("Z-Score（標準偏差ベース）", "z_score"),
-                            ("IQR（四分位数ベース）", "iqr"),
-                            ("移動平均（トレンド乖離）", "moving_avg"),
-                            ("Isolation Forest（機械学習）", "isolation_forest"),
-                            ("Deep SVDD（深層学習）", "deep_svdd"),
-                        ],
-                        value="z_score",
-                        info="📊 各手法の特徴を理解して選択してください",
-                    )
-                    threshold = gr.Slider(
-                        label="🎚️ 検出閾値",
-                        minimum=1.0,
-                        maximum=5.0,
-                        value=3.0,
-                        step=0.1,
-                        info="⚡ 値が大きいほど検出される異常が少なくなります",
-                    )
+    method_labels = {
+        "Z-Score（標準偏差ベース）": "z_score",
+        "IQR（四分位数ベース）": "iqr",
+        "移動平均（トレンド乖離）": "moving_avg",
+        "Isolation Forest（機械学習）": "isolation_forest",
+        "Deep SVDD（深層学習）": "deep_svdd",
+    }
+    llm_labels = {"OpenAI GPT": "openai", "Hugging Face": "huggingface", "Mock（デモ用）": "mock"}
 
-            with gr.Row():
-                with gr.Column(scale=1):
-                    gr.HTML("<h4>🤖 LLM設定</h4>")
-                    llm_provider = gr.Radio(
-                        label="🧠 LLMプロバイダ",
-                        choices=[
-                            ("OpenAI GPT", "openai"),
-                            ("Hugging Face", "huggingface"),
-                            ("Mock（デモ用）", "mock"),
-                        ],
-                        value="mock",
-                        info="🔑 OpenAI/HuggingFaceを使用する場合はAPIキーが必要です",
-                    )
-
-                with gr.Column(scale=1):
-                    gr.HTML("<h4>👥 エージェント設定</h4>")
-                    with gr.Row():
-                        with gr.Column():
-                            use_web_agent = gr.Checkbox(label="🌐 Web情報エージェント", value=True)
-                            use_knowledge_agent = gr.Checkbox(
-                                label="📚 知識ベースエージェント", value=True
-                            )
-                            use_crosscheck_agent = gr.Checkbox(
-                                label="🔄 クロスチェックエージェント", value=True
-                            )
-                        with gr.Column():
-                            use_report_agent = gr.Checkbox(
-                                label="📋 レポート統合エージェント", value=True
-                            )
-                            use_manager_agent = gr.Checkbox(
-                                label="🎯 管理者エージェント", value=True
-                            )
-
-            with gr.Row():
-                with gr.Column():
-                    generate_signals = gr.Checkbox(
-                        label="📈 売買シグナルと将来予測を生成",
-                        value=True,
-                        info="🎯 異常から投資シグナルを生成し、価格を予測します",
-                    )
-                    forecast_days = gr.Slider(
-                        label="📅 予測日数",
-                        minimum=10,
-                        maximum=90,
-                        value=30,
-                        step=5,
-                        info="🔮 将来の何日分を予測するか",
-                    )
-
-            # データソース変更時のイベントハンドラ
-            def update_file_visibility(choice):
-                return gr.update(visible=(choice == "upload"))
-
-            data_source.change(fn=update_file_visibility, inputs=data_source, outputs=file_path)
-
-            gr.HTML("</div>")
-
-        # 分析実行ボタン
-        gr.HTML('<div class="button-container">')
-        analyze_btn = gr.Button(
-            "🚀 異常検知分析を開始",
-            variant="primary",
-            size="lg",
-            elem_classes=["primary-btn"],
-        )
-        gr.HTML("</div>")
-
-        # ステータス表示
-        status_display = gr.HTML("")
-        metrics_display = gr.HTML("")
-
-        # 結果表示セクション
-        with gr.Group():
-            gr.HTML('<div class="results-card fade-in">')
-            gr.HTML("<h3>📊 分析結果</h3>")
-
-            with gr.Tabs():
-                # メインプロットタブ
-                with gr.TabItem("📈 時系列分析", id="main_plot"):
-                    plot_output = gr.Plot(label="時系列データと異常検知結果")
-
-                # 予測プロットタブ
-                with gr.TabItem("🔮 将来予測", id="forecast"):
-                    forecast_plot_output = gr.Plot(label="価格予測と異常調整")
-
-                # 検出結果タブ
-                with gr.TabItem("🎯 検出された異常", id="anomalies"):
-                    gr.HTML("<h4>📋 異常検知結果一覧</h4>")
-                    anomaly_table = gr.DataFrame(
-                        label="検出された異常データ", interactive=False, wrap=True
-                    )
-
-                # シグナルタブ
-                with gr.TabItem("💰 投資シグナル", id="signals"):
-                    gr.HTML("<h4>📊 売買推奨シグナル</h4>")
-                    signals_table = gr.DataFrame(
-                        label="異常から生成された売買シグナル",
-                        interactive=False,
-                        wrap=True,
-                    )
-
-                # エージェント分析タブ
-                with gr.TabItem("🤖 AI分析結果", id="agents"):
-                    gr.HTML("<h4>🧠 マルチエージェント総合分析</h4>")
-                    agent_results = gr.HTML("")
-
-                # 評価タブ
-                with gr.TabItem("📊 性能評価", id="evaluation"):
-                    gr.HTML(
-                        '<div style="background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); padding: 20px; border-radius: 12px; margin-bottom: 20px;">'
-                    )
-                    gr.HTML("<h4>🎯 異常検知精度の評価</h4>")
-                    gr.HTML(
-                        "<p>📈 既知の異常日付を入力して、検出アルゴリズムの性能を定量的に評価します。</p>"
-                    )
-                    gr.HTML("</div>")
-
-                    with gr.Row():
-                        with gr.Column():
-                            known_anomalies = gr.Textbox(
-                                label="📅 既知の異常日付（カンマ区切り、YYYY-MM-DD形式）",
-                                placeholder="例: 1987-10-19, 2008-10-13, 2020-03-16",
-                                value="1987-10-19, 2008-10-13, 2020-03-16",
-                                info="🎯 評価用の正解データとして使用されます",
-                            )
-                        with gr.Column():
-                            delay_tolerance = gr.Number(
-                                label="⏱️ 検知遅延許容値（日数）",
-                                value=0,
-                                minimum=0,
-                                step=1,
-                                info="🔍 検知が何日遅れても正解とみなすか",
-                            )
-
-                    with gr.Row():
-                        evaluate_btn = gr.Button(
-                            "📊 評価実行",
-                            variant="secondary",
-                            elem_classes=["secondary-btn"],
-                        )
-                        compare_btn = gr.Button(
-                            "⚖️ 手法比較",
-                            variant="secondary",
-                            elem_classes=["secondary-btn"],
-                        )
-
-                    with gr.Accordion("📚 評価指標の詳細説明", open=False):
-                        gr.HTML("""
-                        <div style="background: #f8f9fa; padding: 20px; border-radius: 10px; margin: 10px 0;">
-                            <h5>📊 性能指標について</h5>
-                            <ul style="line-height: 1.8;">
-                                <li><strong>🎯 適合率（Precision）:</strong> 検出された異常のうち、実際に異常だった割合。値が高いほど誤検知が少ない。</li>
-                                <li><strong>🔍 再現率（Recall）:</strong> 実際の異常のうち、検出できた割合。値が高いほど見逃しが少ない。</li>
-                                <li><strong>⚖️ F1スコア:</strong> 適合率と再現率の調和平均。総合的な性能指標。</li>
-                                <li><strong>📈 Fβスコア:</strong> 再現率をより重視した指標（β=2）。重大な異常を見逃したくない場合に有用。</li>
-                                <li><strong>⏱️ 検知遅延:</strong> 実際の異常発生から検出までの平均遅れ時間（日数）。</li>
-                            </ul>
-                        </div>
-                        """)
-
-                    gr.HTML("<h5>📈 基本評価指標</h5>")
-                    evaluation_metrics = gr.DataFrame(
-                        label="性能評価結果", interactive=False, wrap=True
-                    )
-
-                    gr.HTML("<h5>📊 混同行列（予測精度の詳細）</h5>")
-                    confusion_matrix_df = gr.DataFrame(label="混同行列", interactive=False)
-
-                    gr.HTML("<h5>⚖️ 複数手法・閾値の比較分析</h5>")
-                    with gr.Row():
-                        methods_select = gr.CheckboxGroup(
-                            label="🔍 比較する検出手法",
-                            choices=[
-                                ("Z-Score", "z_score"),
-                                ("IQR", "iqr"),
-                                ("移動平均", "moving_avg"),
-                                ("Isolation Forest", "isolation_forest"),
-                                ("Deep SVDD", "deep_svdd"),
-                            ],
-                            value=["z_score", "iqr", "moving_avg"],
-                            info="📋 複数の手法を選択して性能を比較できます",
-                        )
-                        thresholds_text = gr.Textbox(
-                            label="🎚️ 比較する閾値（カンマ区切り）",
-                            value="2.0, 2.5, 3.0, 3.5",
-                            placeholder="例: 2.0, 2.5, 3.0, 3.5",
-                            info="📊 異なる閾値での性能を比較します",
-                        )
-
-                    comparison_results = gr.DataFrame(
-                        label="手法比較結果", interactive=False, wrap=True
-                    )
-
-            gr.HTML("</div>")
-
-        # イベントハンドラー
-        def handle_results_display(
-            plot,
-            forecast_plot,
-            status,
-            metrics,
-            anomalies_table,
-            signals_table,
-            findings,
-            df,
-            anomalies,
-        ):
-            agent_html = format_agent_findings(findings)
-            return (
-                plot,
-                forecast_plot,
-                status,
-                metrics,
-                anomalies_table,
-                signals_table,
-                agent_html,
-                df,
-                anomalies,
+    with st.form("analysis_config"):
+        st.subheader("分析設定")
+        data_col, detection_col = st.columns(2)
+        with data_col:
+            source = st.radio("データソース", ["サンプルデータを使用", "ファイルをアップロード"])
+            uploaded_file = (
+                st.file_uploader("時系列データファイル (CSV/XLSX)", type=["csv", "xlsx"])
+                if source == "ファイルをアップロード"
+                else None
             )
+            extra_indicators = st.checkbox("追加指標を含める（出来高、VIX、ドル円）", value=True)
+        with detection_col:
+            method_label = st.selectbox("検出方法", list(method_labels))
+            threshold = st.slider("検出閾値", 1.0, 5.0, 3.0, 0.1)
 
-        def handle_evaluate(stored_df, stored_anomalies, known_anomalies_str, delay_tolerance):
-            if (
-                stored_df is None
-                or stored_anomalies is None
-                or (hasattr(stored_anomalies, "empty") and stored_anomalies.empty)
-            ):
-                return pd.DataFrame(
-                    {"⚠️ 注意": ["先に異常検知分析を実行してください"]}
-                ), pd.DataFrame()
+        llm_col, agent_col = st.columns(2)
+        with llm_col:
+            llm_label = st.radio("LLMプロバイダ", list(llm_labels), index=2)
+            signals_enabled = st.checkbox("売買シグナルと将来予測を生成", value=True)
+            forecast_days = st.slider("予測日数", 10, 90, 30, 5)
+        with agent_col:
+            st.markdown("**エージェント設定**")
+            use_web = st.checkbox("Web情報エージェント", value=True)
+            use_knowledge = st.checkbox("知識ベースエージェント", value=True)
+            use_crosscheck = st.checkbox("クロスチェックエージェント", value=True)
+            use_report = st.checkbox("レポート統合エージェント", value=True)
+            use_manager = st.checkbox("管理者エージェント", value=True)
+        analyze = st.form_submit_button("異常検知分析を開始", type="primary")
 
-            return run_evaluation(stored_df, stored_anomalies, known_anomalies_str, delay_tolerance)
+    if analyze:
+        if source == "ファイルをアップロード" and uploaded_file is None:
+            st.error("CSVまたはXLSXファイルを選択してください。")
+        else:
+            temporary_path = None
+            try:
+                if uploaded_file is not None:
+                    extension = Path(uploaded_file.name).suffix.lower()
+                    if extension not in {".csv", ".xlsx"}:
+                        raise ValueError("CSVまたはXLSXファイルを選択してください。")
+                    with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as temporary:
+                        temporary.write(uploaded_file.getvalue())
+                        temporary_path = Path(temporary.name)
 
-        def handle_compare(stored_df, methods, thresholds_text, known_anomalies_str):
-            if stored_df is None or (hasattr(stored_df, "empty") and stored_df.empty):
-                return pd.DataFrame({"⚠️ 注意": ["先に異常検知分析を実行してください"]})
-            return compare_methods(stored_df, methods, thresholds_text, known_anomalies_str)
+                with st.status("分析中...", expanded=True) as status:
+                    progress_bar = st.progress(0)
 
-        stored_agent_findings = gr.State(None)
+                    def update_progress(fraction, desc=""):
+                        percentage = max(0, min(100, round(float(fraction) * 100)))
+                        progress_bar.progress(percentage, text=desc)
 
-        # 分析実行ボタンのイベント
-        analyze_btn.click(
-            fn=run_analysis,
-            inputs=[
-                data_source,
-                file_path,
-                detection_method,
-                threshold,
-                llm_provider,
-                use_web_agent,
-                use_knowledge_agent,
-                use_crosscheck_agent,
-                use_report_agent,
-                use_manager_agent,
-                include_extra_indicators,
-                generate_signals,
-                forecast_days,
-            ],
-            outputs=[
-                plot_output,
-                forecast_plot_output,
-                status_display,
-                metrics_display,
-                anomaly_table,
-                signals_table,
-                stored_agent_findings,  # ← agent_findings をここに
-                stored_df,  # ← df
-                stored_anomalies,  # ← anomalies
-            ],
-        ).then(
-            fn=handle_results_display,
-            inputs=[
-                plot_output,
-                forecast_plot_output,
-                status_display,
-                metrics_display,
-                anomaly_table,
-                signals_table,
-                stored_agent_findings,  # findings
-                stored_df,  # df
-                stored_anomalies,  # anomalies
-            ],
-            outputs=[
-                plot_output,
-                forecast_plot_output,
-                status_display,
-                metrics_display,
-                anomaly_table,
-                signals_table,
-                agent_results,  # HTML へ描画
-                stored_df,
-                stored_anomalies,
-            ],
+                    results = run_analysis(
+                        "sample" if source == "サンプルデータを使用" else "upload",
+                        temporary_path,
+                        method_labels[method_label],
+                        threshold,
+                        llm_labels[llm_label],
+                        use_web,
+                        use_knowledge,
+                        use_crosscheck,
+                        use_report,
+                        use_manager,
+                        include_extra_indicators=extra_indicators,
+                        generate_signals=signals_enabled,
+                        forecast_days=forecast_days,
+                        progress=update_progress,
+                    )
+                    status.update(
+                        label="分析完了" if results[7] is not None else "分析失敗",
+                        state="complete" if results[7] is not None else "error",
+                    )
+
+                if results[7] is not None:
+                    st.session_state["analysis_result"] = results
+                    st.session_state.pop("evaluation_result", None)
+                    st.session_state.pop("comparison_result", None)
+                else:
+                    st.session_state.pop("analysis_result", None)
+                    st.error("分析に失敗しました。ログと入力内容を確認してください。")
+            except Exception as error:
+                logger.exception("Streamlitからの分析処理に失敗しました")
+                st.error(f"分析エラー: {error}")
+            finally:
+                if temporary_path is not None:
+                    temporary_path.unlink(missing_ok=True)
+
+    results = st.session_state.get("analysis_result")
+    if results is None:
+        st.info("設定を選択して「異常検知分析を開始」を押してください。")
+        return
+
+    plot, forecast_plot, _, _, anomaly_table, signals_table, findings, df, anomalies = results
+    st.success(f"分析が完了しました。{len(anomalies)}件の異常を検出しました。")
+    metric1, metric2, metric3 = st.columns(3)
+    metric1.metric("検出された異常数", len(anomalies))
+    metric2.metric("総データポイント数", f"{len(df):,}")
+    metric3.metric("異常検出率", f"{len(anomalies) / len(df) * 100:.3f}%")
+
+    tabs = st.tabs(["時系列分析", "将来予測", "検出された異常", "投資シグナル", "AI分析結果", "性能評価"])
+    with tabs[0]:
+        st.plotly_chart(plot, width="stretch")
+    with tabs[1]:
+        if forecast_plot is not None:
+            st.plotly_chart(forecast_plot, width="stretch")
+        else:
+            st.info("予測は未生成です。異常が検出され、予測が有効な場合に表示されます。")
+    with tabs[2]:
+        st.dataframe(anomaly_table, width="stretch", hide_index=True)
+    with tabs[3]:
+        st.dataframe(signals_table, width="stretch", hide_index=True)
+    with tabs[4]:
+        st.subheader("マルチエージェント総合分析")
+        if not findings:
+            st.info("エージェント分析結果はありません。")
+        else:
+            for name, finding in findings.items():
+                with st.expander(str(name), expanded=name in {"管理者エージェント", "レポート統合エージェント"}):
+                    if isinstance(finding, dict):
+                        if "error" in finding:
+                            st.error(str(finding["error"]))
+                        if "findings" in finding:
+                            st.write(finding["findings"])
+                    else:
+                        st.write(finding)
+
+    with tabs[5]:
+        st.subheader("異常検知精度の評価")
+        known_dates = st.text_input(
+            "既知の異常日付（カンマ区切り・YYYY-MM-DD）",
+            value="1987-10-19, 2008-10-13, 2020-03-16",
         )
+        delay = st.number_input("検知遅延許容値（日数）", min_value=0, value=0, step=1)
+        evaluate_col, compare_col = st.columns(2)
+        with evaluate_col:
+            if st.button("評価実行"):
+                st.session_state["evaluation_result"] = run_evaluation(df, anomalies, known_dates, delay)
+        with compare_col:
+            if st.button("手法比較"):
+                selected = st.session_state.get("comparison_methods", ["z_score", "iqr", "moving_avg"])
+                limits = st.session_state.get("comparison_thresholds", "2.0, 2.5, 3.0, 3.5")
+                st.session_state["comparison_result"] = compare_methods(df, selected, limits, known_dates)
+        with st.expander("評価指標の詳細説明"):
+            st.markdown(
+                "適合率：検出した異常の正解割合。再現率：実際の異常を検出した割合。"
+                "F1：両者の調和平均。Fβ（β=2）：再現率を重視するスコア。"
+                "検知遅延：異常発生から検出までの平均日数。"
+            )
+        if "evaluation_result" in st.session_state:
+            metrics, matrix = st.session_state["evaluation_result"]
+            st.markdown("**基本評価指標**")
+            st.dataframe(metrics, width="stretch", hide_index=True)
+            st.markdown("**混同行列**")
+            st.dataframe(matrix, width="stretch", hide_index=True)
 
-        # 評価ボタンのイベント
-        evaluate_btn.click(
-            fn=handle_evaluate,
-            inputs=[stored_df, stored_anomalies, known_anomalies, delay_tolerance],
-            outputs=[evaluation_metrics, confusion_matrix_df],
+        st.markdown("**複数手法・閾値の比較**")
+        st.multiselect(
+            "比較する検出手法",
+            options=list(method_labels.values()),
+            default=["z_score", "iqr", "moving_avg"],
+            key="comparison_methods",
         )
-
-        # 手法比較ボタンのイベント
-        compare_btn.click(
-            fn=handle_compare,
-            inputs=[stored_df, methods_select, thresholds_text, known_anomalies],
-            outputs=comparison_results,
-        )
-
-    return app
+        st.text_input("比較する閾値（カンマ区切り）", "2.0, 2.5, 3.0, 3.5", key="comparison_thresholds")
+        if "comparison_result" in st.session_state:
+            st.dataframe(st.session_state["comparison_result"], width="stretch", hide_index=True)
 
 
-# メイン処理
 if __name__ == "__main__":
-    app = create_gradio_ui()
-    app.queue().launch(
-        share=False,
-        server_name="0.0.0.0",
-        server_port=7861,
-        show_error=True,
-        css=CUSTOM_CSS,
-        theme=gr.themes.Soft(primary_hue="blue", secondary_hue="green", neutral_hue="gray"),
-    )
+    create_streamlit_ui()
