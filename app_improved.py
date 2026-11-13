@@ -378,7 +378,8 @@ def run_analysis(
 ):
     try:
         if progress is None:
-            progress = lambda fraction, desc="": None
+            def progress(fraction, desc=""):
+                return None
         # プログレス初期化
         progress(0.0, desc="分析を開始しています...")
 
