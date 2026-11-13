@@ -10,6 +10,7 @@ dependencies = [
     "streamlit==1.67.0",
     "orjson>=3.9,<4",
     "pillow==13.0.0",
+    "pyarrow>=25.0.0,<26",  # 26以降はNumPy 2必須。現行NumPy 1.26を維持
 
     # ── 科学計算 / ML ────────────────────────
     "numpy>=1.26,<1.27",
