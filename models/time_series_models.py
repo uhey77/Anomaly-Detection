@@ -62,39 +62,9 @@ class TimeSeriesModel:
         """
         return self.scaler.inverse_transform(scaled_data)
 
-
-class LSTMModel(TimeSeriesModel):
-    """LSTM時系列予測モデル"""
-
-    def __init__(self, units=50, dropout=0.2):
-        """
-        LSTMモデルを初期化
-
-        Args:
-            units (int): LSTMユニット数
-            dropout (float): ドロップアウト率
-        """
-        super().__init__()
-        self.units = units
-        self.dropout = dropout
-
     def build_model(self, lookback=60):
-        """
-        LSTMモデルを構築
-
-        Args:
-            lookback (int): 遡る期間
-        """
-        model = Sequential()
-        model.add(tf.keras.Input(shape=(lookback, 1)))
-        model.add(LSTM(units=self.units, return_sequences=True))
-        model.add(Dropout(self.dropout))
-        model.add(LSTM(units=self.units))
-        model.add(Dropout(self.dropout))
-        model.add(Dense(1))
-
-        model.compile(optimizer="adam", loss="mean_squared_error")
-        self.model = model
+        """モデルを構築する。サブクラスで実装する。"""
+        raise NotImplementedError
 
     def train(
         self,
@@ -182,6 +152,40 @@ class LSTMModel(TimeSeriesModel):
         forecast_df = pd.DataFrame({"Date": dates, "predicted_price": predictions.flatten()})
 
         return forecast_df
+
+
+class LSTMModel(TimeSeriesModel):
+    """LSTM時系列予測モデル"""
+
+    def __init__(self, units=50, dropout=0.2):
+        """
+        LSTMモデルを初期化
+
+        Args:
+            units (int): LSTMユニット数
+            dropout (float): ドロップアウト率
+        """
+        super().__init__()
+        self.units = units
+        self.dropout = dropout
+
+    def build_model(self, lookback=60):
+        """
+        LSTMモデルを構築
+
+        Args:
+            lookback (int): 遡る期間
+        """
+        model = Sequential()
+        model.add(tf.keras.Input(shape=(lookback, 1)))
+        model.add(LSTM(units=self.units, return_sequences=True))
+        model.add(Dropout(self.dropout))
+        model.add(LSTM(units=self.units))
+        model.add(Dropout(self.dropout))
+        model.add(Dense(1))
+
+        model.compile(optimizer="adam", loss="mean_squared_error")
+        self.model = model
 
 
 class TimesFMModel(TimeSeriesModel):
@@ -249,90 +253,3 @@ class TimesFMModel(TimeSeriesModel):
         model.compile(optimizer="adam", loss="mean_squared_error")
 
         self.model = model
-
-    def train(
-        self,
-        df,
-        target_col="Close",
-        lookback=60,
-        epochs=50,
-        batch_size=32,
-        validation_split=0.2,
-    ):
-        """
-        モデルをトレーニング
-
-        Args:
-            df (pd.DataFrame): 入力データ
-            target_col (str): 目標変数のカラム名
-            lookback (int): 遡る期間
-            epochs (int): エポック数
-            batch_size (int): バッチサイズ
-            validation_split (float): 検証データの割合
-
-        Returns:
-            history: トレーニング履歴
-        """
-        X_train, y_train = self.prepare_data(df, target_col, lookback)
-
-        if self.model is None:
-            self.build_model(lookback)
-
-        history = self.model.fit(
-            X_train,
-            y_train,
-            epochs=epochs,
-            batch_size=batch_size,
-            validation_split=validation_split,
-            verbose=1,
-        )
-
-        return history
-
-    def forecast(self, df, days_ahead=30, target_col="Close", lookback=60):
-        """
-        将来の価格を予測
-
-        Args:
-            df (pd.DataFrame): 入力データ
-            days_ahead (int): 予測日数
-            target_col (str): 目標変数のカラム名
-            lookback (int): 遡る期間
-
-        Returns:
-            pd.DataFrame: 予測結果
-        """
-        if self.model is None:
-            raise ValueError("モデルがトレーニングされていません")
-
-        # 最後のlookback日間のデータを取得
-        last_data = df[target_col].values[-lookback:].reshape(-1, 1)
-        scaled_last_data = self.scaler.transform(last_data)
-
-        # 予測用の入力データを準備
-        X_pred = scaled_last_data.reshape(1, lookback, 1)
-
-        # 予測結果を格納するリスト
-        predictions = []
-
-        # days_ahead日分の予測
-        for _ in range(days_ahead):
-            # 予測
-            next_pred = self.model.predict(X_pred)
-            predictions.append(next_pred[0, 0])
-
-            # 次の入力データを更新
-            X_pred = np.append(X_pred[:, 1:, :], next_pred.reshape(1, 1, 1), axis=1)
-
-        # 予測結果を元のスケールに戻す
-        predictions = np.array(predictions).reshape(-1, 1)
-        predictions = self.scaler.inverse_transform(predictions)
-
-        # 予測日付を生成
-        last_date = df["Date"].iloc[-1]
-        dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=days_ahead)
-
-        # 予測結果をデータフレームに変換
-        forecast_df = pd.DataFrame({"Date": dates, "predicted_price": predictions.flatten()})
-
-        return forecast_df
